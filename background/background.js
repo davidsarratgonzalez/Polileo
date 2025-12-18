@@ -169,9 +169,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === 'watchThread') {
     // Register a thread for monitoring
     const tabId = sender.tab?.id;
-    console.log('Polileo BG: watchThread request - threadId:', msg.threadId, 'tabId:', tabId, 'initialCount:', msg.initialCount);
-    if (tabId && msg.threadId) {
-      watchedThreads.set(msg.threadId, {
+    const threadId = msg.threadId;
+    console.log('Polileo BG: watchThread request - threadId:', threadId, 'tabId:', tabId, 'initialCount:', msg.initialCount);
+    if (tabId && threadId) {
+      watchedThreads.set(threadId, {
         tabId: tabId,
         initialCount: msg.initialCount || 0,
         lastNotifiedCount: msg.initialCount || 0
@@ -179,12 +180,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       saveWatchedThreads();
       console.log('Polileo BG: Thread registered. Total watched:', watchedThreads.size);
       startThreadWatching();
+
+      // IMMEDIATE first check for this thread
+      setTimeout(async () => {
+        console.log('Polileo BG: IMMEDIATE first check for new thread', threadId);
+        await checkThreadImmediately(threadId);
+      }, 100);  // Small delay to let page settle
     }
     sendResponse({ success: true });
     return true;
   } else if (msg.action === 'unwatchThread') {
     // Stop monitoring a thread
     watchedThreads.delete(msg.threadId);
+    delete lastCheckTime[msg.threadId];
     saveWatchedThreads();
     if (watchedThreads.size === 0) {
       stopThreadWatching();
@@ -374,8 +382,16 @@ async function updateBadge(windowId) {
 }
 
 // ============================================
-// Thread watching - detect new replies
+// Thread watching - detect new replies (ROBUST EVENT-DRIVEN SYSTEM)
 // ============================================
+
+// Track the current active watched thread for priority checking
+let currentActiveThreadId = null;
+let lastActiveTabId = null;
+
+// Debounce/throttle state to prevent hammering
+let lastCheckTime = {};  // { threadId: timestamp }
+const MIN_CHECK_INTERVAL = 200;  // Minimum ms between checks of same thread
 
 function startThreadWatching() {
   if (threadWatchFastTimer && threadWatchSlowTimer) {
@@ -388,11 +404,14 @@ function startThreadWatching() {
   // Start both timers
   scheduleFastCheck();
   scheduleSlowCheck();
+  // Update active thread tracking
+  updateActiveThread();
 }
 
 function scheduleFastCheck() {
+  if (threadWatchFastTimer) clearTimeout(threadWatchFastTimer);
   if (watchedThreads.size === 0) {
-    stopThreadWatching();
+    threadWatchFastTimer = null;
     return;
   }
   threadWatchFastTimer = setTimeout(async () => {
@@ -402,12 +421,13 @@ function scheduleFastCheck() {
 }
 
 function scheduleSlowCheck() {
+  if (threadWatchSlowTimer) clearTimeout(threadWatchSlowTimer);
   if (watchedThreads.size === 0) {
-    stopThreadWatching();
+    threadWatchSlowTimer = null;
     return;
   }
   threadWatchSlowTimer = setTimeout(async () => {
-    await checkAllThreads();
+    await checkInactiveThreads();
     scheduleSlowCheck();
   }, THREAD_WATCH_SLOW);
 }
@@ -423,59 +443,156 @@ function stopThreadWatching() {
     threadWatchSlowTimer = null;
   }
   chrome.alarms.clear(THREAD_WATCH_ALARM);
+  currentActiveThreadId = null;
+  lastActiveTabId = null;
 }
 
-// Fast check: only the active tab's thread (every 500ms)
-async function checkActiveThread() {
-  if (watchedThreads.size === 0) return;
-
-  // Find active tab
-  let activeTabId = null;
+// Update which thread is currently active (based on focused tab)
+async function updateActiveThread() {
   try {
     let tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!tabs.length) tabs = await chrome.tabs.query({ active: true });
-    activeTabId = tabs[0]?.id;
-  } catch {
-    return;
-  }
+    const activeTabId = tabs[0]?.id;
 
-  // Find thread for active tab
-  for (const [threadId, info] of watchedThreads) {
-    if (info.tabId === activeTabId) {
-      await checkSingleThread(threadId, info);
-      break;
+    if (activeTabId === lastActiveTabId) return; // No change
+
+    lastActiveTabId = activeTabId;
+    currentActiveThreadId = null;
+
+    // Find if this tab has a watched thread
+    for (const [threadId, info] of watchedThreads) {
+      if (info.tabId === activeTabId) {
+        currentActiveThreadId = threadId;
+        console.log('Polileo BG: Active thread changed to', threadId);
+        break;
+      }
     }
+  } catch (e) {
+    console.log('Polileo BG: Error updating active thread', e);
   }
 }
 
-// Slow check: all threads (every 2 seconds)
-async function checkAllThreads() {
+// IMMEDIATE check for a specific thread (with throttle protection)
+async function checkThreadImmediately(threadId) {
+  const info = watchedThreads.get(threadId);
+  if (!info) return;
+
+  // Throttle: don't check same thread too frequently
+  const now = Date.now();
+  const lastCheck = lastCheckTime[threadId] || 0;
+  if (now - lastCheck < MIN_CHECK_INTERVAL) {
+    console.log('Polileo BG: Throttled check for', threadId);
+    return;
+  }
+  lastCheckTime[threadId] = now;
+
+  console.log('Polileo BG: IMMEDIATE check for thread', threadId);
+  await checkSingleThread(threadId, info);
+}
+
+// Check the active thread (fast timer)
+async function checkActiveThread() {
   if (watchedThreads.size === 0) return;
 
-  console.log('Polileo BG: Checking all', watchedThreads.size, 'threads');
+  // Update active thread tracking
+  await updateActiveThread();
+
+  if (currentActiveThreadId && watchedThreads.has(currentActiveThreadId)) {
+    await checkThreadImmediately(currentActiveThreadId);
+  }
+}
+
+// Check inactive threads only (slow timer) - skip the active one
+async function checkInactiveThreads() {
+  if (watchedThreads.size === 0) return;
+
   const threadsToRemove = [];
+  let checkedCount = 0;
 
   for (const [threadId, info] of watchedThreads) {
+    // Skip the active thread (it's checked by fast timer)
+    if (threadId === currentActiveThreadId) continue;
+
     // Check if tab still exists
     try {
       await chrome.tabs.get(info.tabId);
     } catch {
-      console.log('Polileo: Tab closed for thread', threadId);
+      console.log('Polileo BG: Tab closed for thread', threadId);
       threadsToRemove.push(threadId);
       continue;
     }
 
     await checkSingleThread(threadId, info);
+    checkedCount++;
+  }
+
+  if (checkedCount > 0) {
+    console.log('Polileo BG: Checked', checkedCount, 'inactive threads');
   }
 
   // Cleanup
   for (const threadId of threadsToRemove) {
     watchedThreads.delete(threadId);
+    delete lastCheckTime[threadId];
   }
   if (threadsToRemove.length > 0) {
     saveWatchedThreads();
   }
 }
+
+// ============================================
+// Event listeners for IMMEDIATE reactivity
+// ============================================
+
+// When user switches tabs - check immediately
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  if (watchedThreads.size === 0) return;
+
+  const tabId = activeInfo.tabId;
+  lastActiveTabId = tabId;
+
+  // Find if this tab has a watched thread
+  for (const [threadId, info] of watchedThreads) {
+    if (info.tabId === tabId) {
+      console.log('Polileo BG: Tab activated with watched thread', threadId);
+      currentActiveThreadId = threadId;
+      // IMMEDIATE check
+      await checkThreadImmediately(threadId);
+      return;
+    }
+  }
+
+  // Not a watched thread tab
+  currentActiveThreadId = null;
+});
+
+// When window focus changes - check immediately
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  if (watchedThreads.size === 0) return;
+
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, windowId });
+    if (!activeTab) return;
+
+    lastActiveTabId = activeTab.id;
+
+    // Find if this tab has a watched thread
+    for (const [threadId, info] of watchedThreads) {
+      if (info.tabId === activeTab.id) {
+        console.log('Polileo BG: Window focused with watched thread', threadId);
+        currentActiveThreadId = threadId;
+        // IMMEDIATE check
+        await checkThreadImmediately(threadId);
+        return;
+      }
+    }
+
+    currentActiveThreadId = null;
+  } catch (e) {
+    // Window might not exist
+  }
+});
 
 // Check a single thread for pole
 async function checkSingleThread(threadId, info) {
