@@ -86,18 +86,40 @@ function isAntiFailEnabled() {
 }
 
 // Inject anti-fail checkbox next to submit button
-function injectAntiFailCheckbox() {
+function injectAntiFailCheckbox(defaultEnabled) {
   const submitBtn = document.getElementById('qr_submit');
   if (!submitBtn || document.getElementById('polebot-antifail')) return;
+
+  // Store original button state
+  const originalValue = submitBtn.value;
+  const originalBackground = submitBtn.style.background;
+  const originalBorder = submitBtn.style.border;
+  const originalCursor = submitBtn.style.cursor;
 
   const container = document.createElement('label');
   container.id = 'polebot-antifail-container';
   container.innerHTML = `
-    <input type="checkbox" id="polebot-antifail" checked>
+    <input type="checkbox" id="polebot-antifail" ${defaultEnabled ? 'checked' : ''}>
     <span>Anti-fail</span>
   `;
 
   submitBtn.parentNode.insertBefore(container, submitBtn);
+
+  // Listen for checkbox changes to unblock/block button
+  document.getElementById('polebot-antifail').addEventListener('change', (e) => {
+    if (!e.target.checked) {
+      // Unblock the button
+      submitBtn.disabled = false;
+      submitBtn.value = originalValue;
+      submitBtn.style.background = originalBackground;
+      submitBtn.style.border = originalBorder;
+      submitBtn.style.cursor = originalCursor;
+      submitBtn.dataset.polebotBlocked = 'false';
+    } else if (submitBtn.dataset.polebotBlocked === 'false' && document.getElementById('polebot-reply-alert')) {
+      // Re-block if pole was detected
+      blockSubmitButton();
+    }
+  });
 }
 
 // Show notification when pole detected
@@ -111,7 +133,7 @@ function showPoleDetectedNotification() {
   const alert = document.createElement('div');
   alert.id = 'polebot-reply-alert';
   alert.innerHTML = `
-    <span>Ya hay pole</span>
+    <span>¡Pole detectada!</span>
     <button id="polebot-alert-close">×</button>
   `;
   document.body.appendChild(alert);
@@ -145,8 +167,11 @@ if (threadId && isAutoOpenedByPolebot()) {
 
   // Only monitor if it's a valid pole (1 post = only OP)
   if (initialPostCount === 1) {
-    // Inject anti-fail checkbox
-    injectAntiFailCheckbox();
+    // Load settings and inject anti-fail checkbox
+    chrome.storage.local.get(['antifailDefault'], (result) => {
+      const antifailEnabled = result.antifailDefault !== false;
+      injectAntiFailCheckbox(antifailEnabled);
+    });
 
     safeSendMessage({
       action: 'watchThread',

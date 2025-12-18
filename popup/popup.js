@@ -2,12 +2,24 @@ document.addEventListener('DOMContentLoaded', () => {
   const toggleBtn = document.getElementById('toggleBtn');
   const clearBtn = document.getElementById('clearBtn');
   const statusEl = document.getElementById('status');
+  const antifailDefaultEl = document.getElementById('antifailDefault');
 
   // Get initial status
   chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
     if (response) {
       updateUI(response.isActive);
     }
+  });
+
+  // Load settings
+  chrome.storage.local.get(['antifailDefault'], (result) => {
+    // Default to true if not set
+    antifailDefaultEl.checked = result.antifailDefault !== false;
+  });
+
+  // Save antifail setting on change
+  antifailDefaultEl.addEventListener('change', () => {
+    chrome.storage.local.set({ antifailDefault: antifailDefaultEl.checked });
   });
 
   // Toggle button click
