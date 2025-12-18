@@ -78,7 +78,7 @@
 }
 
 #polileo-lock-btn.locked {
-  background: linear-gradient(135deg, #ffd700, #daa520);
+  background: #e6b800;
   color: #5c4a00;
   box-shadow: 0 2px 8px rgba(218, 165, 32, 0.4);
 }

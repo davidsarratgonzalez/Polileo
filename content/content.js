@@ -96,6 +96,166 @@ function updateLockButton(isLocked) {
   lockBtn.className = isLocked ? 'locked' : 'unlocked';
 }
 
+// ============================================
+// Hotkey handling
+// ============================================
+
+const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+
+const defaultHotkeys = {
+  toggleLock: { key: 'Escape', ctrl: false, alt: false, meta: false, shift: false },
+  focusReply: { key: 'Tab', ctrl: false, alt: false, meta: false, shift: false },
+  submitReply: isMac
+    ? { key: 's', ctrl: false, alt: false, meta: true, shift: false }
+    : { key: 's', ctrl: false, alt: true, meta: false, shift: false }
+};
+
+let currentHotkeys = { ...defaultHotkeys };
+
+// Load hotkeys from storage
+function loadHotkeys() {
+  if (!isExtensionContextValid()) return;
+  try {
+    chrome.storage.local.get(['hotkeys'], (result) => {
+      if (chrome.runtime.lastError) return;
+      if (result.hotkeys) {
+        currentHotkeys = { ...defaultHotkeys, ...result.hotkeys };
+      }
+    });
+  } catch {
+    // Extension context invalidated
+  }
+}
+loadHotkeys();
+
+// Listen for hotkey changes
+try {
+  chrome.storage.onChanged.addListener((changes) => {
+    if (!isExtensionContextValid()) return;
+    if (changes.hotkeys) {
+      currentHotkeys = { ...defaultHotkeys, ...changes.hotkeys.newValue };
+    }
+  });
+} catch {
+  // Extension context invalidated
+}
+
+// Hotkey listener
+document.addEventListener('keydown', (e) => {
+  // Don't trigger hotkeys when typing in input fields (except submit hotkey)
+  const isTyping = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) ||
+                   document.activeElement.classList.contains('wysiwyg') ||
+                   document.activeElement.closest('iframe');
+
+  // Check toggleLock hotkey
+  if (matchesHotkey(e, currentHotkeys.toggleLock) && !isTyping) {
+    e.preventDefault();
+    lockBtn.click();
+    return;
+  }
+
+  // Check focusReply hotkey
+  if (matchesHotkey(e, currentHotkeys.focusReply) && !isTyping) {
+    e.preventDefault();
+    focusReplyBox();
+    return;
+  }
+
+  // Check submitReply hotkey (allow even when typing)
+  if (matchesHotkey(e, currentHotkeys.submitReply)) {
+    const submitBtn = document.getElementById('qr_submit');
+    if (submitBtn && !submitBtn.disabled) {
+      e.preventDefault();
+      submitBtn.click();
+    }
+    return;
+  }
+});
+
+// Focus the reply text box (wysiwyg iframe)
+function focusReplyBox() {
+  const iframe = getEditorIframe();
+
+  if (iframe) {
+    // Scroll to the editor area
+    iframe.scrollIntoView({ behavior: 'instant', block: 'center' });
+
+    try {
+      iframe.focus();
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      const body = iframeDoc.querySelector('body.wysiwyg') || iframeDoc.body;
+      if (body) {
+        body.focus();
+      }
+    } catch {
+      // Cross-origin or other issue, just focus iframe
+      iframe.focus();
+    }
+    return;
+  }
+
+  // Fallback: try textarea
+  const textarea = document.querySelector('textarea[name="message"]') ||
+                   document.querySelector('#qr_message');
+  if (textarea) {
+    textarea.scrollIntoView({ behavior: 'instant', block: 'center' });
+    textarea.focus();
+  }
+}
+
+// Get the editor iframe
+function getEditorIframe() {
+  return document.querySelector('iframe[id*="vB_Editor"]') ||
+         document.querySelector('iframe.wysiwyg') ||
+         document.querySelector('#vB_Editor_QR_editor');
+}
+
+// Inject hotkey listener into iframe for submit hotkey
+function injectIframeHotkeyListener() {
+  const iframe = getEditorIframe();
+  if (!iframe) return;
+
+  try {
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+    if (!iframeDoc || iframeDoc._polileoHotkeyInjected) return;
+
+    iframeDoc._polileoHotkeyInjected = true;
+    iframeDoc.addEventListener('keydown', (e) => {
+      // Check submitReply hotkey
+      if (matchesHotkey(e, currentHotkeys.submitReply)) {
+        const submitBtn = document.getElementById('qr_submit');
+        if (submitBtn && !submitBtn.disabled) {
+          e.preventDefault();
+          submitBtn.click();
+        }
+      }
+    });
+  } catch {
+    // Cross-origin iframe, can't inject
+  }
+}
+
+// Try to inject on load and observe for iframe creation
+injectIframeHotkeyListener();
+
+// Re-inject when iframe might be created/recreated
+const iframeObserver = new MutationObserver(() => {
+  injectIframeHotkeyListener();
+});
+iframeObserver.observe(document.body, { childList: true, subtree: true });
+
+function matchesHotkey(event, hotkey) {
+  if (!hotkey) return false;
+
+  const keyMatches = event.key.toLowerCase() === hotkey.key.toLowerCase();
+  const ctrlMatches = event.ctrlKey === hotkey.ctrl;
+  const altMatches = event.altKey === hotkey.alt;
+  const metaMatches = event.metaKey === hotkey.meta;
+  const shiftMatches = event.shiftKey === hotkey.shift;
+
+  return keyMatches && ctrlMatches && altMatches && metaMatches && shiftMatches;
+}
+
 // Position button below subheader (if exists) or header, aligned with avatar
 function updateButtonPosition() {
   const subheader = document.getElementById('subheader');
