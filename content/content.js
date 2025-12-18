@@ -209,6 +209,13 @@ window.addEventListener('resize', positionCooldownBar);
 // Initialize cooldown tracking (always active)
 showCooldownBar(); // Show existing cooldown if any
 
+// Re-check cooldown when tab becomes visible (user switches back to tab)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    showCooldownBar();
+  }
+});
+
 // Anti-fail features on threads with no pole yet (always active)
 const threadId = getThreadId();
 if (threadId) {
