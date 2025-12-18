@@ -11,11 +11,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const advancedToggle = document.getElementById('advancedToggle');
   const advancedContent = document.getElementById('advancedContent');
   const pollIntervalEl = document.getElementById('pollInterval');
-  const threadWatchFastEl = document.getElementById('threadWatchFast');
-  const threadWatchSlowEl = document.getElementById('threadWatchSlow');
+  const threadCheckEl = document.getElementById('threadCheck');
   const pollIntervalValueEl = document.getElementById('pollIntervalValue');
-  const threadWatchFastValueEl = document.getElementById('threadWatchFastValue');
-  const threadWatchSlowValueEl = document.getElementById('threadWatchSlowValue');
+  const threadCheckValueEl = document.getElementById('threadCheckValue');
 
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 
@@ -31,8 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Default timing values
   const defaultTimings = {
     pollInterval: 500,       // 500ms for forum polling
-    threadWatchFast: 500,    // 500ms for active thread
-    threadWatchSlow: 1000    // 1s for other threads
+    threadCheck: 500         // 500ms for checking threads
   };
 
   let recordingElement = null;
@@ -57,11 +54,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Load timing settings
     const timings = result.timings || defaultTimings;
     pollIntervalEl.value = timings.pollInterval || defaultTimings.pollInterval;
-    threadWatchFastEl.value = timings.threadWatchFast || defaultTimings.threadWatchFast;
-    threadWatchSlowEl.value = timings.threadWatchSlow || defaultTimings.threadWatchSlow;
+    threadCheckEl.value = timings.threadCheck || timings.threadWatchFast || defaultTimings.threadCheck;
     updateSliderDisplay(pollIntervalEl, pollIntervalValueEl);
-    updateSliderDisplay(threadWatchFastEl, threadWatchFastValueEl);
-    updateSliderDisplay(threadWatchSlowEl, threadWatchSlowValueEl);
+    updateSliderDisplay(threadCheckEl, threadCheckValueEl);
   });
 
   // Save settings on change
@@ -85,13 +80,8 @@ document.addEventListener('DOMContentLoaded', () => {
     saveTimings();
   });
 
-  threadWatchFastEl.addEventListener('input', () => {
-    updateSliderDisplay(threadWatchFastEl, threadWatchFastValueEl);
-    saveTimings();
-  });
-
-  threadWatchSlowEl.addEventListener('input', () => {
-    updateSliderDisplay(threadWatchSlowEl, threadWatchSlowValueEl);
+  threadCheckEl.addEventListener('input', () => {
+    updateSliderDisplay(threadCheckEl, threadCheckValueEl);
     saveTimings();
   });
 
@@ -102,8 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function saveTimings() {
     const timings = {
       pollInterval: parseInt(pollIntervalEl.value),
-      threadWatchFast: parseInt(threadWatchFastEl.value),
-      threadWatchSlow: parseInt(threadWatchSlowEl.value)
+      threadCheck: parseInt(threadCheckEl.value)
     };
     chrome.storage.local.set({ timings });
   }
