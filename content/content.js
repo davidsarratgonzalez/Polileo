@@ -1,8 +1,8 @@
 // Create floating button
 const btn = document.createElement('button');
-btn.id = 'polebot-btn';
-btn.textContent = 'P';
-btn.title = 'Polebot - Click to toggle';
+btn.id = 'polileo-btn';
+btn.innerHTML = `<img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="Polileo">`;
+btn.title = 'Polileo - Click to toggle';
 document.body.appendChild(btn);
 
 // Get initial state
@@ -29,7 +29,7 @@ btn.addEventListener('click', () => {
 
 function updateButton(isActive) {
   btn.className = isActive ? 'active' : 'inactive';
-  btn.title = isActive ? 'Polebot ACTIVE - Click to stop' : 'Polebot OFF - Click to start';
+  btn.title = isActive ? 'Polileo ACTIVE - Click to stop' : 'Polileo OFF - Click to start';
 }
 
 // ============================================
@@ -44,9 +44,9 @@ function getThreadId() {
   return match ? match[1] : null;
 }
 
-// Check if this thread was auto-opened by polebot
-function isAutoOpenedByPolebot() {
-  return window.location.href.includes('polebot=1');
+// Check if this thread was auto-opened by polileo
+function isAutoOpenedByPolileo() {
+  return window.location.href.includes('polileo=1');
 }
 
 // Count posts in the current DOM (the "frozen" state when page loaded)
@@ -77,20 +77,20 @@ function blockSubmitButton() {
     submitBtn.style.background = '#666';
     submitBtn.style.border = 'none';
     submitBtn.style.cursor = 'not-allowed';
-    submitBtn.dataset.polebotBlocked = 'true';
+    submitBtn.dataset.polileoBlocked = 'true';
   }
 }
 
 // Check if anti-fail is enabled
 function isAntiFailEnabled() {
-  const checkbox = document.getElementById('polebot-antifail');
+  const checkbox = document.getElementById('polileo-antifail');
   return checkbox ? checkbox.checked : true;
 }
 
 // Inject anti-fail checkbox next to submit button
 function injectAntiFailCheckbox(defaultEnabled) {
   const submitBtn = document.getElementById('qr_submit');
-  if (!submitBtn || document.getElementById('polebot-antifail')) return;
+  if (!submitBtn || document.getElementById('polileo-antifail')) return;
 
   // Store original button state
   const originalValue = submitBtn.value;
@@ -99,16 +99,16 @@ function injectAntiFailCheckbox(defaultEnabled) {
   const originalCursor = submitBtn.style.cursor;
 
   const container = document.createElement('label');
-  container.id = 'polebot-antifail-container';
+  container.id = 'polileo-antifail-container';
   container.innerHTML = `
-    <input type="checkbox" id="polebot-antifail" ${defaultEnabled ? 'checked' : ''}>
+    <input type="checkbox" id="polileo-antifail" ${defaultEnabled ? 'checked' : ''}>
     <span>Anti-fail</span>
   `;
 
   submitBtn.parentNode.insertBefore(container, submitBtn);
 
   // Listen for checkbox changes to unblock/block button
-  document.getElementById('polebot-antifail').addEventListener('change', (e) => {
+  document.getElementById('polileo-antifail').addEventListener('change', (e) => {
     if (!e.target.checked) {
       // Unblock the button
       submitBtn.disabled = false;
@@ -116,8 +116,8 @@ function injectAntiFailCheckbox(defaultEnabled) {
       submitBtn.style.background = originalBackground;
       submitBtn.style.border = originalBorder;
       submitBtn.style.cursor = originalCursor;
-      submitBtn.dataset.polebotBlocked = 'false';
-    } else if (submitBtn.dataset.polebotBlocked === 'false' && document.getElementById('polebot-reply-alert')) {
+      submitBtn.dataset.polileoBlocked = 'false';
+    } else if (submitBtn.dataset.polileoBlocked === 'false' && document.getElementById('polileo-reply-alert')) {
       // Re-block if pole was detected
       blockSubmitButton();
     }
@@ -129,21 +129,21 @@ function showPoleDetectedNotification() {
   if (poleAlreadyDetected) return;
   poleAlreadyDetected = true;
 
-  const existing = document.getElementById('polebot-reply-alert');
+  const existing = document.getElementById('polileo-reply-alert');
   if (existing) existing.remove();
 
   // Block submit button
   blockSubmitButton();
 
   const alert = document.createElement('div');
-  alert.id = 'polebot-reply-alert';
+  alert.id = 'polileo-reply-alert';
   alert.innerHTML = `
     <span>¡Pole detectada!</span>
-    <button id="polebot-alert-close">×</button>
+    <button id="polileo-alert-close">×</button>
   `;
   document.body.appendChild(alert);
 
-  document.getElementById('polebot-alert-close').addEventListener('click', () => {
+  document.getElementById('polileo-alert-close').addEventListener('click', () => {
     alert.remove();
   });
 }
@@ -152,6 +152,8 @@ function showPoleDetectedNotification() {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === 'poleDetected' && !poleAlreadyDetected) {
     showPoleDetectedNotification();
+  } else if (msg.action === 'windowStatusChanged') {
+    updateButton(msg.isActive);
   }
 });
 
@@ -160,15 +162,15 @@ function safeSendMessage(msg, callback) {
   try {
     chrome.runtime.sendMessage(msg, callback);
   } catch (e) {
-    console.log('Polebot: Extension context invalidated');
+    console.log('Polileo: Extension context invalidated');
   }
 }
 
-// If we're on a thread auto-opened by polebot with only 1 post, monitor it
+// If we're on a thread auto-opened by polileo with only 1 post, monitor it
 const threadId = getThreadId();
-if (threadId && isAutoOpenedByPolebot()) {
+if (threadId && isAutoOpenedByPolileo()) {
   const initialPostCount = countPostsInDOM();
-  console.log('Polebot: Auto-opened thread', threadId, 'with', initialPostCount, 'posts');
+  console.log('Polileo: Auto-opened thread', threadId, 'with', initialPostCount, 'posts');
 
   // Only monitor if it's a valid pole (1 post = only OP)
   if (initialPostCount === 1) {
@@ -189,6 +191,6 @@ if (threadId && isAutoOpenedByPolebot()) {
       safeSendMessage({ action: 'unwatchThread', threadId: threadId });
     });
   } else {
-    console.log('Polebot: Thread already has pole, not monitoring');
+    console.log('Polileo: Thread already has pole, not monitoring');
   }
 }

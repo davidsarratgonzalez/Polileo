@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Polebot",
+  "name": "Polileo",
   "version": "1.0.0",
   "permissions": [
     "storage",
@@ -33,6 +33,12 @@
       "js": ["content/content.js"],
       "css": ["content/content.css"],
       "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*.png"],
+      "matches": ["https://*.forocoches.com/*"]
     }
   ]
 }

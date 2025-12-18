@@ -1,4 +1,4 @@
-#polebot-btn {
+#polileo-btn {
   position: fixed;
   top: 10px;
   right: 10px;
@@ -8,26 +8,34 @@
   border-radius: 50%;
   border: none;
   cursor: pointer;
-  font-size: 24px;
-  font-weight: bold;
-  color: white;
+  padding: 0;
+  overflow: hidden;
   box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
 }
 
-#polebot-btn:hover {
+#polileo-btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#polileo-btn:hover {
   transform: scale(1.1);
   box-shadow: 0 6px 20px rgba(0,0,0,0.4);
 }
 
-#polebot-btn.active {
+#polileo-btn.active {
   background: linear-gradient(135deg, #4CAF50, #8BC34A);
   animation: pulse 1.5s infinite;
+  filter: none;
 }
 
-#polebot-btn.inactive {
+#polileo-btn.inactive {
   background: #666;
   animation: none;
+  filter: grayscale(100%);
+  opacity: 0.7;
 }
 
 @keyframes pulse {
@@ -37,7 +45,7 @@
 }
 
 /* New replies notification */
-#polebot-reply-alert {
+#polileo-reply-alert {
   position: fixed;
   top: 70px;
   right: 10px;
@@ -56,11 +64,11 @@
   animation: slideIn 0.3s ease;
 }
 
-#polebot-reply-alert span {
+#polileo-reply-alert span {
   flex: 1;
 }
 
-#polebot-alert-close {
+#polileo-alert-close {
   background: rgba(255,255,255,0.2);
   border: none;
   color: white;
@@ -75,7 +83,7 @@
   justify-content: center;
 }
 
-#polebot-alert-close:hover {
+#polileo-alert-close:hover {
   background: rgba(255,255,255,0.3);
 }
 
@@ -91,7 +99,7 @@
 }
 
 /* Anti-fail checkbox */
-#polebot-antifail-container {
+#polileo-antifail-container {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -102,10 +110,10 @@
   user-select: none;
 }
 
-#polebot-antifail-container:hover {
+#polileo-antifail-container:hover {
   color: #333;
 }
 
-#polebot-antifail {
+#polileo-antifail {
   cursor: pointer;
 }

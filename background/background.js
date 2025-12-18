@@ -1,7 +1,7 @@
 const FOROCOCHES_URL = 'https://www.forocoches.com/foro/forumdisplay.php?f=2';
 const POLL_INTERVAL = 500;
 const THREAD_WATCH_INTERVAL = 500;
-const ALARM_NAME = 'polebot-keepalive';
+const ALARM_NAME = 'polileo-keepalive';
 const MAX_OPENED_THREADS = 100;
 
 // Per-window state: { windowId: { isActive, openedThreads } }
@@ -37,6 +37,20 @@ chrome.windows.onRemoved.addListener((windowId) => {
   windowStates.delete(windowId);
   saveStates();
   updatePolling();
+});
+
+// When a tab is moved to a new window, notify it of the new window's status
+chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
+  const newWindowId = attachInfo.newWindowId;
+  const state = windowStates.get(newWindowId);
+  const isActive = state?.isActive || false;
+
+  chrome.tabs.sendMessage(tabId, {
+    action: 'windowStatusChanged',
+    isActive: isActive
+  }).catch(() => {
+    // Tab might not have content script
+  });
 });
 
 // Handle messages
@@ -151,8 +165,8 @@ async function poll() {
               const oldest = state.openedThreads.values().next().value;
               state.openedThreads.delete(oldest);
             }
-            // Add polebot=1 param so content script knows this was auto-opened
-            chrome.tabs.create({ url: `${pole.url}&polebot=1`, active: true, windowId });
+            // Add polileo=1 param so content script knows this was auto-opened
+            chrome.tabs.create({ url: `${pole.url}&polileo=1`, active: true, windowId });
           }
         }
       }
@@ -278,7 +292,7 @@ async function checkWatchedThreads() {
 
         // Stop monitoring this thread
         watchedThreads.delete(threadId);
-        console.log('Polebot: Pole detected in thread', threadId, '- stopping monitor');
+        console.log('Polileo: Pole detected in thread', threadId, '- stopping monitor');
       }
     } catch {
       // Network error or tab closed, continue
