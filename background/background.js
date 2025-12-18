@@ -12,6 +12,9 @@ let pollTimer = null;
 const watchedThreads = new Map();
 let threadWatchTimer = null;
 
+// Track tabs where pole was already taken (so we don't force lock on them)
+const tabsWithPole = new Set();
+
 // Load saved state on startup
 chrome.storage.local.get(['windowStates'], (result) => {
   if (result.windowStates) {
@@ -113,7 +116,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     sendResponse({ success: true });
     return true;
+  } else if (msg.action === 'polileoPageHasPole') {
+    // Track that this tab's polileo page already has a pole
+    const tabId = sender.tab?.id;
+    if (tabId && msg.hasPole) {
+      tabsWithPole.add(tabId);
+    }
+    sendResponse({ success: true });
+    return true;
   }
+});
+
+// Clean up tabsWithPole when tabs are closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabsWithPole.delete(tabId);
 });
 
 // Single global polling loop
@@ -232,8 +248,8 @@ async function shouldLockFocusForWindow(windowId) {
     // Get the active tab in this window
     const [activeTab] = await chrome.tabs.query({ active: true, windowId: windowId });
 
-    // If active tab is a polileo-opened thread, always lock
-    if (activeTab?.url?.includes('polileo=1')) {
+    // If active tab is a polileo-opened thread AND doesn't have pole yet, lock
+    if (activeTab?.url?.includes('polileo=1') && !tabsWithPole.has(activeTab.id)) {
       return true;
     }
   } catch {

@@ -16,16 +16,25 @@ const unlockIconSvg = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12
 // Detect if this page was opened by Polileo
 const isPolileoPage = window.location.href.includes('polileo=1');
 
-// Local lock state for this page (for polileo pages that start locked)
-let localLockState = isPolileoPage;
+// Check if there's still a chance for pole (only 1 post = OP only)
+const hasNoPoleYet = countPostsInDOM() === 1;
+
+// Local lock state for this page
+// Only auto-lock on polileo pages that still have no pole
+let localLockState = isPolileoPage && hasNoPoleYet;
+
+// Tell background if this polileo page already has a pole
+if (isPolileoPage && !hasNoPoleYet) {
+  safeSendMessage({ action: 'polileoPageHasPole', hasPole: true });
+}
 
 // Get initial lock state
 function loadLockState() {
-  if (isPolileoPage) {
-    // Polileo pages always start locked
+  if (isPolileoPage && hasNoPoleYet) {
+    // Polileo pages with no pole yet start locked
     updateLockButton(localLockState);
   } else {
-    // Non-polileo pages use stored preference (default: unlocked)
+    // All other pages (including polileo with pole) use stored preference
     try {
       chrome.storage.local.get(['focusLockManual'], (result) => {
         if (chrome.runtime.lastError) return;
@@ -40,12 +49,12 @@ loadLockState();
 
 // Toggle lock on click
 lockBtn.addEventListener('click', () => {
-  if (isPolileoPage) {
-    // Polileo pages: toggle local state only (doesn't persist)
+  if (isPolileoPage && hasNoPoleYet) {
+    // Polileo pages with no pole: toggle local state only (doesn't persist)
     localLockState = !localLockState;
     updateLockButton(localLockState);
   } else {
-    // Non-polileo pages: toggle and save to storage
+    // All other pages: toggle and save to storage
     try {
       chrome.storage.local.get(['focusLockManual'], (result) => {
         if (chrome.runtime.lastError) return;
@@ -59,9 +68,9 @@ lockBtn.addEventListener('click', () => {
   }
 });
 
-// Re-check when tab becomes visible (for non-polileo pages)
+// Re-check when tab becomes visible (for pages using global state)
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !isPolileoPage) {
+  if (document.visibilityState === 'visible' && !(isPolileoPage && hasNoPoleYet)) {
     loadLockState();
   }
 });
@@ -493,6 +502,8 @@ function showPoleDetectedNotification(poleAuthor) {
     if (isPolileoPage) {
       localLockState = false;
       updateLockButton(false);
+      // Notify background so it doesn't force lock on this tab anymore
+      safeSendMessage({ action: 'polileoPageHasPole', hasPole: true });
     }
 
     const authorText = poleAuthor ? `Pole de ${poleAuthor}` : '¡Pole detectada!';
