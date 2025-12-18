@@ -526,9 +526,12 @@ function showCooldownBar() {
       const remaining = COOLDOWN_DURATION - elapsed;
 
       if (remaining <= 0) {
-        // Cooldown finished
+        // Cooldown finished - fade out then remove
         const bar = document.getElementById('polileo-cooldown');
-        if (bar) bar.remove();
+        if (bar && !bar.classList.contains('fade-out')) {
+          bar.classList.add('fade-out');
+          setTimeout(() => bar.remove(), 500);
+        }
         return;
       }
 
@@ -551,6 +554,16 @@ function showCooldownBar() {
   }
 }
 
+
+// Detect successful post via URL (posted=1 parameter)
+if (window.location.href.includes('posted=1')) {
+  console.log('Polileo: Detected posted=1 in URL - starting cooldown');
+  try {
+    chrome.storage.local.set({ lastPostTime: Date.now() });
+  } catch {
+    // Extension context invalidated
+  }
+}
 
 // Initialize cooldown tracking (always active)
 showCooldownBar(); // Show existing cooldown if any

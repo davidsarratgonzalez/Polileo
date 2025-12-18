@@ -232,3 +232,18 @@
   border-radius: 2px;
   transition: width 0.1s linear;
 }
+
+#polileo-cooldown.fade-out {
+  animation: cooldownFadeOut 0.5s ease forwards;
+}
+
+@keyframes cooldownFadeOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
