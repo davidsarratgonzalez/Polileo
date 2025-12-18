@@ -5,15 +5,24 @@ btn.innerHTML = `<img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="Po
 btn.title = 'Polileo - Click to toggle';
 document.body.appendChild(btn);
 
-// Position button below subheader (if exists) or header
+// Position button below subheader (if exists) or header, aligned with avatar
 function updateButtonPosition() {
   const subheader = document.getElementById('subheader');
   const header = document.getElementById('header');
+  const avatar = document.querySelector('.header-profile-image-span');
   const referenceEl = subheader || header;
 
   if (referenceEl) {
     const bottom = referenceEl.getBoundingClientRect().bottom;
     btn.style.top = (bottom + 10) + 'px';
+  }
+
+  // Align horizontally with avatar
+  if (avatar) {
+    const avatarRect = avatar.getBoundingClientRect();
+    const avatarCenterX = avatarRect.left + avatarRect.width / 2;
+    btn.style.left = (avatarCenterX - 25) + 'px'; // 25 = half button width
+    btn.style.right = 'auto';
   }
 }
 updateButtonPosition();
@@ -157,8 +166,11 @@ function showPoleDetectedNotification() {
   `;
   document.body.appendChild(alert);
 
-  // Position alert at same height as button
+  // Position alert at same height as button and to its left
   alert.style.top = btn.style.top;
+  const btnRect = btn.getBoundingClientRect();
+  alert.style.left = 'auto';
+  alert.style.right = (window.innerWidth - btnRect.left + 10) + 'px';
 
   document.getElementById('polileo-alert-close').addEventListener('click', () => {
     alert.remove();
