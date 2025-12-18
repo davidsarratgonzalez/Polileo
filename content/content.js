@@ -166,9 +166,12 @@ function showPoleDetectedNotification() {
   `;
   document.body.appendChild(alert);
 
-  // Position alert at same height as button and to its left
-  alert.style.top = btn.style.top;
+  // Position alert vertically centered with button and to its left
   const btnRect = btn.getBoundingClientRect();
+  const alertRect = alert.getBoundingClientRect();
+  const btnCenterY = btnRect.top + btnRect.height / 2;
+  const alertTop = btnCenterY - alertRect.height / 2;
+  alert.style.top = alertTop + 'px';
   alert.style.left = 'auto';
   alert.style.right = (window.innerWidth - btnRect.left + 10) + 'px';
 

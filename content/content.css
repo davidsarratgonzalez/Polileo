@@ -42,7 +42,7 @@
   100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
 }
 
-/* New replies notification */
+/* New replies notification - speech bubble */
 #polileo-reply-alert {
   position: fixed;
   right: 70px;
@@ -59,6 +59,17 @@
   align-items: center;
   gap: 10px;
   animation: slideIn 0.3s ease;
+}
+
+#polileo-reply-alert::after {
+  content: '';
+  position: absolute;
+  right: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 8px solid transparent;
+  border-left-color: #f44336;
+  border-right: 0;
 }
 
 #polileo-reply-alert span {
