@@ -258,13 +258,17 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   });
 });
 
-// GUARDRAIL 2: Periodic scan of all tabs to find unwatched threads
-const GUARDRAIL_SCAN_INTERVAL = 10000;  // Every 10 seconds
+// GUARDRAIL 2: Aggressive periodic scan - runs in parallel, never blocks
+const GUARDRAIL_SCAN_INTERVAL = 200;  // Every 200ms
+const GUARDRAIL_FETCH_TIMEOUT = 2000; // 2 second timeout per fetch
 let guardrailScanTimer = null;
+
+// Track threads currently being checked to avoid duplicate parallel checks
+const threadsBeingChecked = new Set();
 
 function startGuardrailScan() {
   if (guardrailScanTimer) return;
-  console.log('Polileo BG: Starting guardrail scan');
+  console.log('Polileo BG: Starting guardrail scan (every', GUARDRAIL_SCAN_INTERVAL, 'ms)');
   guardrailScanTimer = setInterval(scanForUnwatchedThreads, GUARDRAIL_SCAN_INTERVAL);
 }
 
@@ -275,6 +279,7 @@ function stopGuardrailScan() {
   }
 }
 
+// Non-blocking scan - fires off parallel checks
 async function scanForUnwatchedThreads() {
   try {
     const tabs = await chrome.tabs.query({ url: '*://*.forocoches.com/*' });
@@ -289,14 +294,75 @@ async function scanForUnwatchedThreads() {
       // Skip if we know this tab has a pole already
       if (tabsWithPole.has(tab.id)) continue;
 
-      // Ask content script to verify and register if needed
-      console.log('Polileo BG: [GUARDRAIL SCAN] Found potential unwatched thread', threadId, 'in tab', tab.id);
-      chrome.tabs.sendMessage(tab.id, { action: 'checkAndRegister' }).catch(() => {
-        // Content script might not be available
-      });
+      // Skip if already being checked (parallel check in progress)
+      if (threadsBeingChecked.has(threadId)) continue;
+
+      // Fire off parallel check - don't await!
+      checkThreadGuardrail(threadId, tab.id);
     }
   } catch (e) {
-    console.log('Polileo BG: Guardrail scan error', e);
+    // Silently ignore scan errors
+  }
+}
+
+// Check a single thread with timeout - runs in parallel
+async function checkThreadGuardrail(threadId, tabId) {
+  // Mark as being checked
+  threadsBeingChecked.add(threadId);
+
+  try {
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), GUARDRAIL_FETCH_TIMEOUT);
+
+    const resp = await fetch(
+      `https://www.forocoches.com/foro/showthread.php?t=${threadId}&_=${Date.now()}`,
+      {
+        credentials: 'include',
+        cache: 'no-store',
+        signal: controller.signal
+      }
+    );
+
+    clearTimeout(timeoutId);
+
+    if (!resp.ok) {
+      threadsBeingChecked.delete(threadId);
+      return;
+    }
+
+    const html = await resp.text();
+    const postCount = countPostsInHtml(html);
+
+    // Double-check it's not already watched (might have been registered while we fetched)
+    if (watchedThreads.has(threadId)) {
+      threadsBeingChecked.delete(threadId);
+      return;
+    }
+
+    if (postCount === 1) {
+      // No pole yet - register for watching!
+      console.log('Polileo BG: [GUARDRAIL] ✓ Thread', threadId, 'has no pole - REGISTERING');
+      watchedThreads.set(threadId, {
+        tabId: tabId,
+        initialCount: 1,
+        lastNotifiedCount: 1
+      });
+      saveWatchedThreads();
+      startThreadWatching();
+
+      // Also notify content script to inject anti-fail UI
+      chrome.tabs.sendMessage(tabId, { action: 'checkAndRegister' }).catch(() => {});
+    } else if (postCount > 1) {
+      // Already has pole - mark tab so we don't check again
+      console.log('Polileo BG: [GUARDRAIL] Thread', threadId, 'already has pole');
+      tabsWithPole.add(tabId);
+    }
+  } catch (e) {
+    // Timeout or network error - silently ignore, will retry next interval
+  } finally {
+    // Always remove from being-checked set
+    threadsBeingChecked.delete(threadId);
   }
 }
 

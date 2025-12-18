@@ -492,7 +492,7 @@ function setupSubmitDetector() {
 }
 setupSubmitDetector();
 
-// Create cooldown bar element - inline next to submit button
+// Create cooldown bar element - fixed position, follows you on screen
 function createCooldownBar() {
   if (document.getElementById('polileo-cooldown')) {
     return document.getElementById('polileo-cooldown');
@@ -510,18 +510,7 @@ function createCooldownBar() {
     </div>
   `;
 
-  // Insert next to submit button if possible, otherwise near anti-fail checkbox
-  const submitBtn = document.getElementById('qr_submit');
-  const antifailContainer = document.getElementById('polileo-antifail-container');
-
-  if (antifailContainer) {
-    antifailContainer.parentNode.insertBefore(bar, antifailContainer);
-  } else if (submitBtn) {
-    submitBtn.parentNode.insertBefore(bar, submitBtn);
-  } else {
-    document.body.appendChild(bar);
-  }
-
+  document.body.appendChild(bar);
   return bar;
 }
 
