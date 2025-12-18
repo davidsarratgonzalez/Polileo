@@ -96,6 +96,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.action === 'toggle') {
     getWindowId().then(windowId => {
+      console.log('Polileo BG: Toggle for windowId:', windowId);
       let state = windowStates.get(windowId);
       if (!state) {
         state = { isActive: false, openedThreads: new Set() };
@@ -103,6 +104,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       state.isActive = !state.isActive;
+      console.log('Polileo BG: Window', windowId, 'isActive:', state.isActive);
       saveStates();
       updatePolling();
       updateBadge(windowId);
@@ -181,11 +183,14 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // Single global polling loop
 function updatePolling() {
   const anyActive = [...windowStates.values()].some(s => s.isActive);
+  console.log('Polileo BG: updatePolling() - anyActive:', anyActive, 'pollTimer:', !!pollTimer, 'windowStates size:', windowStates.size);
 
   if (anyActive && !pollTimer) {
+    console.log('Polileo BG: Starting forum polling');
     chrome.alarms.create(ALARM_NAME, { periodInMinutes: 0.33 });
     poll();
   } else if (!anyActive && pollTimer) {
+    console.log('Polileo BG: Stopping forum polling');
     chrome.alarms.clear(ALARM_NAME);
     clearTimeout(pollTimer);
     pollTimer = null;
@@ -194,6 +199,7 @@ function updatePolling() {
 
 async function poll() {
   const activeWindows = [...windowStates.entries()].filter(([, s]) => s.isActive);
+  console.log('Polileo BG: poll() called, activeWindows:', activeWindows.length);
   if (activeWindows.length === 0) {
     pollTimer = null;
     return;
@@ -208,6 +214,7 @@ async function poll() {
     if (resp.ok) {
       const html = await resp.text();
       const poles = findPoles(html);
+      console.log('Polileo BG: Found', poles.length, 'potential poles');
 
       // Open poles in each active window (if not already opened in that window)
       for (const [windowId, state] of activeWindows) {
@@ -221,6 +228,7 @@ async function poll() {
 
         for (const pole of poles) {
           if (!state.openedThreads.has(pole.id)) {
+            console.log('Polileo BG: Opening new pole:', pole.id, pole.title);
             state.openedThreads.add(pole.id);
             // Cleanup old threads if limit exceeded
             while (state.openedThreads.size > MAX_OPENED_THREADS) {
@@ -232,13 +240,15 @@ async function poll() {
             // Add polileo=1 param so content script knows this was auto-opened
             // If focus lock is ON, open in background (active: false)
             chrome.tabs.create({ url: `${pole.url}&polileo=1`, active: !shouldLock, windowId });
+          } else {
+            console.log('Polileo BG: Pole already opened:', pole.id);
           }
         }
       }
       saveStates();
     }
-  } catch {
-    // Network error, continue polling
+  } catch (e) {
+    console.log('Polileo BG: Network error during poll:', e);
   }
 
   // Schedule next poll
@@ -260,6 +270,8 @@ function findPoles(html) {
 
   const t2 = /showthread\.php\?t=(\d+)[^>]*>([^<]{3,})</gi;
   while ((m = t2.exec(html))) if (!titles.has(m[1])) titles.set(m[1], m[2].trim());
+
+  console.log('Polileo BG: findPoles - found', titles.size, 'thread titles');
 
   const r = /whoposted[^"]*t=(\d+)[^>]*>(\d+)</gi;
   while ((m = r.exec(html))) {
@@ -367,10 +379,11 @@ async function checkWatchedThreads() {
   // Only poll the thread from the active tab to avoid rate limiting
   let activeTabId = null;
   try {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     activeTabId = activeTab?.id;
-  } catch {
-    // Could not get active tab
+    console.log('Polileo BG: Active tab is', activeTabId);
+  } catch (e) {
+    console.log('Polileo BG: Could not get active tab', e);
   }
 
   for (const [threadId, info] of watchedThreads) {
