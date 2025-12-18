@@ -364,6 +364,15 @@ async function checkWatchedThreads() {
     return;
   }
 
+  // Only poll the thread from the active tab to avoid rate limiting
+  let activeTabId = null;
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    activeTabId = activeTab?.id;
+  } catch {
+    // Could not get active tab
+  }
+
   for (const [threadId, info] of watchedThreads) {
     try {
       // Check if tab still exists
@@ -372,6 +381,11 @@ async function checkWatchedThreads() {
       } catch {
         console.log('Polileo: Tab no longer exists for thread', threadId);
         watchedThreads.delete(threadId);
+        continue;
+      }
+
+      // Skip if this is not the active tab
+      if (info.tabId !== activeTabId) {
         continue;
       }
 
