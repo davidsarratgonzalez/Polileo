@@ -298,6 +298,9 @@ async function checkWatchedThreads() {
           action: 'poleDetected',
           currentCount: currentCount,
           poleAuthor: poleAuthor
+        }).catch(() => {
+          // Tab might be closed or navigated away
+          console.log('Polileo: Could not send message to tab', info.tabId);
         });
 
         // Stop monitoring this thread

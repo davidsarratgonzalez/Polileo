@@ -378,17 +378,16 @@ function safeSendMessage(msg, callback) {
   }
 }
 
-// If we're on a thread auto-opened by polileo with only 1 post, monitor it
+// If we're on ANY thread with only 1 post (no pole yet), enable anti-fail features
 const threadId = getThreadId();
-console.log('Polileo: Page loaded. Thread ID:', threadId, 'Auto-opened:', isAutoOpenedByPolileo());
 
-if (threadId && isAutoOpenedByPolileo()) {
+if (threadId) {
   const initialPostCount = countPostsInDOM();
-  console.log('Polileo: Auto-opened thread', threadId, 'with', initialPostCount, 'posts');
+  console.log('Polileo: Thread', threadId, 'has', initialPostCount, 'posts');
 
-  // Only monitor if it's a valid pole (1 post = only OP)
+  // Only enable anti-fail if it's a valid pole opportunity (1 post = only OP)
   if (initialPostCount === 1) {
-    console.log('Polileo: Valid pole thread, starting monitoring...');
+    console.log('Polileo: No pole yet! Enabling anti-fail features...');
 
     // Load settings and inject anti-fail checkbox
     chrome.storage.local.get(['antifailDefault'], (result) => {
@@ -396,6 +395,7 @@ if (threadId && isAutoOpenedByPolileo()) {
       injectAntiFailCheckbox(antifailEnabled);
     });
 
+    // Start monitoring for new replies
     safeSendMessage({
       action: 'watchThread',
       threadId: threadId,
@@ -409,6 +409,6 @@ if (threadId && isAutoOpenedByPolileo()) {
       safeSendMessage({ action: 'unwatchThread', threadId: threadId });
     });
   } else {
-    console.log('Polileo: Thread already has', initialPostCount, 'posts, not monitoring');
+    console.log('Polileo: Thread already has pole, anti-fail not needed');
   }
 }
