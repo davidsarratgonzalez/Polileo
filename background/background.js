@@ -2,6 +2,7 @@ const FOROCOCHES_URL = 'https://www.forocoches.com/foro/forumdisplay.php?f=2';
 const POLL_INTERVAL = 500;
 const THREAD_WATCH_INTERVAL = 500;
 const ALARM_NAME = 'polileo-keepalive';
+const THREAD_WATCH_ALARM = 'polileo-thread-watch';
 const MAX_OPENED_THREADS = 100;
 
 // Per-window state: { windowId: { isActive, openedThreads } }
@@ -14,6 +15,28 @@ let threadWatchTimer = null;
 
 // Track tabs where pole was already taken (so we don't force lock on them)
 const tabsWithPole = new Set();
+
+// Load watched threads from storage on startup (in case service worker restarted)
+chrome.storage.local.get(['watchedThreadsData'], (result) => {
+  if (result.watchedThreadsData) {
+    for (const [threadId, info] of Object.entries(result.watchedThreadsData)) {
+      watchedThreads.set(threadId, info);
+    }
+    console.log('Polileo BG: Restored', watchedThreads.size, 'watched threads from storage');
+    if (watchedThreads.size > 0) {
+      startThreadWatching();
+    }
+  }
+});
+
+// Save watched threads when they change
+function saveWatchedThreads() {
+  const data = {};
+  for (const [threadId, info] of watchedThreads) {
+    data[threadId] = info;
+  }
+  chrome.storage.local.set({ watchedThreadsData: data });
+}
 
 // Load saved state on startup
 chrome.storage.local.get(['windowStates'], (result) => {
@@ -32,6 +55,13 @@ chrome.storage.local.get(['windowStates'], (result) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) {
     poll();
+  } else if (alarm.name === THREAD_WATCH_ALARM) {
+    // Alarm fired - service worker may have been idle
+    // Restart the setTimeout chain if there are threads to watch
+    console.log('Polileo BG: Thread watch alarm fired, threads:', watchedThreads.size);
+    if (watchedThreads.size > 0 && !threadWatchTimer) {
+      scheduleThreadCheck();
+    }
   }
 });
 
@@ -98,12 +128,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === 'watchThread') {
     // Register a thread for monitoring
     const tabId = sender.tab?.id;
+    console.log('Polileo BG: watchThread request - threadId:', msg.threadId, 'tabId:', tabId, 'initialCount:', msg.initialCount);
     if (tabId && msg.threadId) {
       watchedThreads.set(msg.threadId, {
         tabId: tabId,
         initialCount: msg.initialCount || 0,
         lastNotifiedCount: msg.initialCount || 0
       });
+      saveWatchedThreads();
+      console.log('Polileo BG: Thread registered. Total watched:', watchedThreads.size);
       startThreadWatching();
     }
     sendResponse({ success: true });
@@ -111,6 +144,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === 'unwatchThread') {
     // Stop monitoring a thread
     watchedThreads.delete(msg.threadId);
+    saveWatchedThreads();
     if (watchedThreads.size === 0) {
       stopThreadWatching();
     }
@@ -127,9 +161,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-// Clean up tabsWithPole when tabs are closed
+// Clean up tabsWithPole and watchedThreads when tabs are closed
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabsWithPole.delete(tabId);
+
+  // Also remove any watched threads for this tab
+  for (const [threadId, info] of watchedThreads) {
+    if (info.tabId === tabId) {
+      watchedThreads.delete(threadId);
+      console.log('Polileo BG: Removed watched thread', threadId, 'because tab closed');
+    }
+  }
+  if (watchedThreads.size === 0) {
+    stopThreadWatching();
+  }
+  saveWatchedThreads();
 });
 
 // Single global polling loop
@@ -281,21 +327,40 @@ async function updateBadge(windowId) {
 // ============================================
 
 function startThreadWatching() {
-  if (threadWatchTimer) return;
-  threadWatchTimer = setInterval(checkWatchedThreads, THREAD_WATCH_INTERVAL);
-  checkWatchedThreads(); // Check immediately
+  if (threadWatchTimer) {
+    console.log('Polileo BG: Thread watcher already running');
+    return;
+  }
+  console.log('Polileo BG: Starting thread watcher (interval:', THREAD_WATCH_INTERVAL, 'ms)');
+  // Create alarm to keep service worker alive (minimum 0.5 min = 30 sec)
+  chrome.alarms.create(THREAD_WATCH_ALARM, { periodInMinutes: 0.5 });
+  // Use setTimeout chain for fast polling
+  scheduleThreadCheck();
+}
+
+function scheduleThreadCheck() {
+  if (watchedThreads.size === 0) {
+    stopThreadWatching();
+    return;
+  }
+  threadWatchTimer = setTimeout(async () => {
+    await checkWatchedThreads();
+    scheduleThreadCheck();
+  }, THREAD_WATCH_INTERVAL);
 }
 
 function stopThreadWatching() {
+  console.log('Polileo BG: Stopping thread watcher');
   if (threadWatchTimer) {
-    clearInterval(threadWatchTimer);
+    clearTimeout(threadWatchTimer);
     threadWatchTimer = null;
   }
+  chrome.alarms.clear(THREAD_WATCH_ALARM);
 }
 
 async function checkWatchedThreads() {
+  console.log('Polileo BG: Checking', watchedThreads.size, 'watched threads');
   if (watchedThreads.size === 0) {
-    stopThreadWatching();
     return;
   }
 
@@ -343,6 +408,7 @@ async function checkWatchedThreads() {
 
         // Stop monitoring this thread
         watchedThreads.delete(threadId);
+        saveWatchedThreads();
         console.log('Polileo: Stopped monitoring thread', threadId);
       }
     } catch (e) {

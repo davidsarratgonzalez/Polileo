@@ -26,7 +26,10 @@ const unlockIconSvg = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12
 const isPolileoPage = window.location.href.includes('polileo=1');
 
 // Check if there's still a chance for pole (only 1 post = OP only)
-const hasNoPoleYet = countPostsInDOM() === 1;
+const initialPostCount = countPostsInDOM();
+const hasNoPoleYet = initialPostCount === 1;
+
+console.log('Polileo: Page load check - isPolileoPage:', isPolileoPage, 'posts:', initialPostCount, 'hasNoPoleYet:', hasNoPoleYet);
 
 // Local lock state for this page
 // Only auto-lock on polileo pages that still have no pole
@@ -34,6 +37,7 @@ let localLockState = isPolileoPage && hasNoPoleYet;
 
 // Tell background if this polileo page already has a pole
 if (isPolileoPage && !hasNoPoleYet) {
+  console.log('Polileo: This polileo page already has pole, using global lock state');
   safeSendMessage({ action: 'polileoPageHasPole', hasPole: true });
 }
 
