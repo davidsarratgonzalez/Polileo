@@ -218,6 +218,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   for (const [threadId, info] of watchedThreads) {
     if (info.tabId === tabId) {
       watchedThreads.delete(threadId);
+      delete lastCheckTime[threadId];
       console.log('Polileo BG: Removed watched thread', threadId, 'because tab closed');
     }
   }
@@ -226,6 +227,90 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
   saveWatchedThreads();
 });
+
+// ============================================
+// GUARDRAILS - Ensure we don't miss any threads
+// ============================================
+
+// Extract thread ID from URL
+function extractThreadIdFromUrl(url) {
+  if (!url || !url.includes('forocoches.com')) return null;
+  if (!url.includes('showthread.php')) return null;
+
+  let match = url.match(/showthread\.php\?.*?t=(\d+)/);
+  if (match) return match[1];
+
+  match = url.match(/showthread\.php\/(\d+)/);
+  if (match) return match[1];
+
+  match = url.match(/[?&]t=(\d+)/);
+  if (match) return match[1];
+
+  return null;
+}
+
+// GUARDRAIL 1: Watch for tab URL changes - when a tab navigates to a thread
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Only act when the page has finished loading
+  if (changeInfo.status !== 'complete') return;
+
+  const threadId = extractThreadIdFromUrl(tab.url);
+  if (!threadId) return;
+
+  // Check if this thread is already being watched
+  if (watchedThreads.has(threadId)) return;
+
+  // Ask content script to check and register if needed
+  console.log('Polileo BG: [GUARDRAIL] Tab navigated to thread', threadId, '- requesting check');
+  chrome.tabs.sendMessage(tabId, { action: 'checkAndRegister' }).catch(() => {
+    // Content script might not be ready yet
+  });
+});
+
+// GUARDRAIL 2: Periodic scan of all tabs to find unwatched threads
+const GUARDRAIL_SCAN_INTERVAL = 10000;  // Every 10 seconds
+let guardrailScanTimer = null;
+
+function startGuardrailScan() {
+  if (guardrailScanTimer) return;
+  console.log('Polileo BG: Starting guardrail scan');
+  guardrailScanTimer = setInterval(scanForUnwatchedThreads, GUARDRAIL_SCAN_INTERVAL);
+}
+
+function stopGuardrailScan() {
+  if (guardrailScanTimer) {
+    clearInterval(guardrailScanTimer);
+    guardrailScanTimer = null;
+  }
+}
+
+async function scanForUnwatchedThreads() {
+  try {
+    const tabs = await chrome.tabs.query({ url: '*://*.forocoches.com/*' });
+
+    for (const tab of tabs) {
+      const threadId = extractThreadIdFromUrl(tab.url);
+      if (!threadId) continue;
+
+      // Skip if already watched
+      if (watchedThreads.has(threadId)) continue;
+
+      // Skip if we know this tab has a pole already
+      if (tabsWithPole.has(tab.id)) continue;
+
+      // Ask content script to verify and register if needed
+      console.log('Polileo BG: [GUARDRAIL SCAN] Found potential unwatched thread', threadId, 'in tab', tab.id);
+      chrome.tabs.sendMessage(tab.id, { action: 'checkAndRegister' }).catch(() => {
+        // Content script might not be available
+      });
+    }
+  } catch (e) {
+    console.log('Polileo BG: Guardrail scan error', e);
+  }
+}
+
+// Start guardrail scan when extension loads
+startGuardrailScan();
 
 // Single global polling loop
 function updatePolling() {
@@ -596,6 +681,8 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
 
 // Check a single thread for pole
 async function checkSingleThread(threadId, info) {
+  const checkStart = Date.now();
+
   try {
     const resp = await fetch(
       `https://www.forocoches.com/foro/showthread.php?t=${threadId}&_=${Date.now()}`,
@@ -603,16 +690,20 @@ async function checkSingleThread(threadId, info) {
     );
 
     if (!resp.ok) {
-      console.log('Polileo: Fetch failed for', threadId);
+      console.log('Polileo: ✗ Fetch failed for thread', threadId, '- status:', resp.status);
       return;
     }
 
     const html = await resp.text();
     const currentCount = countPostsInHtml(html);
+    const elapsed = Date.now() - checkStart;
+
+    // Update lastCheckTime after successful check
+    lastCheckTime[threadId] = Date.now();
 
     if (currentCount > 1) {
       const poleAuthor = extractPoleAuthor(html);
-      console.log('Polileo: *** POLE DETECTED *** Thread:', threadId, 'Author:', poleAuthor);
+      console.log('Polileo: 🎯 *** POLE DETECTED *** Thread:', threadId, 'Posts:', currentCount, 'Author:', poleAuthor, '(check took', elapsed, 'ms)');
 
       // Notify the tab
       chrome.tabs.sendMessage(info.tabId, {
@@ -625,10 +716,14 @@ async function checkSingleThread(threadId, info) {
 
       // Stop monitoring
       watchedThreads.delete(threadId);
+      delete lastCheckTime[threadId];
       saveWatchedThreads();
+    } else {
+      // Still only 1 post - no pole yet
+      console.log('Polileo: ✓ Thread', threadId, 'checked - still', currentCount, 'post(s) (', elapsed, 'ms)');
     }
   } catch (e) {
-    console.log('Polileo: Error checking', threadId, e);
+    console.log('Polileo: ✗ Error checking thread', threadId, '-', e.message);
   }
 }
 

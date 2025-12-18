@@ -35,6 +35,9 @@ console.log('Polileo: Page load check - isPolileoPage:', isPolileoPage, 'posts:'
 let localLockState = false;
 let useLocalLockState = false; // Whether to use local state or global
 
+// Track if this thread is registered for watching (for guardrails)
+let isRegistered = false;
+
 // Initialize lock state based on settings
 function initLockState() {
   try {
@@ -552,36 +555,51 @@ document.addEventListener('visibilitychange', () => {
 
 // Anti-fail features on threads with no pole yet (always active)
 const threadId = getThreadId();
+console.log('Polileo: URL:', window.location.href, '-> threadId:', threadId);
+
 if (threadId) {
-  const initialPostCount = countPostsInDOM();
-  console.log('Polileo: Thread', threadId, 'has', initialPostCount, 'posts');
+  // Small delay to ensure DOM is fully ready
+  setTimeout(() => {
+    const postCount = countPostsInDOM();
+    console.log('Polileo: Thread', threadId, 'has', postCount, 'posts');
 
-  if (initialPostCount === 1) {
-    console.log('Polileo: No pole yet! Enabling anti-fail features...');
+    if (postCount === 1) {
+      console.log('Polileo: *** NO POLE YET! *** Registering for watching...');
 
-    try {
-      chrome.storage.local.get(['antifailDefault'], (result) => {
-        if (chrome.runtime.lastError) return;
-        const antifailEnabled = result.antifailDefault !== false;
-        injectAntiFailCheckbox(antifailEnabled);
+      try {
+        chrome.storage.local.get(['antifailDefault'], (result) => {
+          if (chrome.runtime.lastError) return;
+          const antifailEnabled = result.antifailDefault !== false;
+          injectAntiFailCheckbox(antifailEnabled);
+        });
+      } catch {
+        // Extension context invalidated - use default
+        injectAntiFailCheckbox(true);
+      }
+
+      // Register thread for watching
+      safeSendMessage({
+        action: 'watchThread',
+        threadId: threadId,
+        initialCount: postCount
+      }, (response) => {
+        if (response?.success) {
+          isRegistered = true;  // Mark as registered for guardrail checks
+          console.log('Polileo: ✓ Thread', threadId, 'registered for watching');
+        } else {
+          console.log('Polileo: ✗ Failed to register thread', threadId, response);
+        }
       });
-    } catch {
-      // Extension context invalidated - use default
-      injectAntiFailCheckbox(true);
+
+      window.addEventListener('beforeunload', () => {
+        safeSendMessage({ action: 'unwatchThread', threadId: threadId });
+      });
+    } else if (postCount > 1) {
+      console.log('Polileo: Thread already has pole (', postCount, 'posts)');
+    } else {
+      console.log('Polileo: Could not count posts in thread');
     }
-
-    safeSendMessage({
-      action: 'watchThread',
-      threadId: threadId,
-      initialCount: initialPostCount
-    }, (response) => {
-      console.log('Polileo: watchThread response:', response);
-    });
-
-    window.addEventListener('beforeunload', () => {
-      safeSendMessage({ action: 'unwatchThread', threadId: threadId });
-    });
-  }
+  }, 50);  // Small delay for DOM stability
 }
 
 // ============================================
@@ -590,10 +608,24 @@ if (threadId) {
 
 let poleAlreadyDetected = false;
 
-// Check if we're on a thread page
+// Check if we're on a thread page (robust URL matching)
 function getThreadId() {
-  const match = window.location.href.match(/showthread\.php\?t=(\d+)/);
-  return match ? match[1] : null;
+  const url = window.location.href;
+
+  // Try multiple patterns
+  // Pattern 1: showthread.php?t=123
+  let match = url.match(/showthread\.php\?.*?t=(\d+)/);
+  if (match) return match[1];
+
+  // Pattern 2: showthread.php/123
+  match = url.match(/showthread\.php\/(\d+)/);
+  if (match) return match[1];
+
+  // Pattern 3: t=123 anywhere in URL (fallback)
+  match = url.match(/[?&]t=(\d+)/);
+  if (match) return match[1];
+
+  return null;
 }
 
 // Check if this thread was auto-opened by polileo
@@ -603,20 +635,29 @@ function isAutoOpenedByPolileo() {
 
 // Count posts in the current DOM (the "frozen" state when page loaded)
 function countPostsInDOM() {
-  const selectors = [
-    '[id^="post_message_"]',
-    '[id^="postbit_wrapper_"]',
-    'a[id^="postcount"]',
-    '.postbitlegacy',
-    '.postcontainer'
-  ];
-
-  for (const selector of selectors) {
-    const posts = document.querySelectorAll(selector);
-    if (posts.length > 0) {
-      return posts.length;
-    }
+  // Most reliable: post_message_ divs
+  const postMessages = document.querySelectorAll('[id^="post_message_"]');
+  if (postMessages.length > 0) {
+    console.log('Polileo: countPostsInDOM found', postMessages.length, 'posts via post_message_');
+    return postMessages.length;
   }
+
+  // Fallback: postcount links
+  const postcounts = document.querySelectorAll('a[id^="postcount"]');
+  if (postcounts.length > 0) {
+    console.log('Polileo: countPostsInDOM found', postcounts.length, 'posts via postcount');
+    return postcounts.length;
+  }
+
+  // Fallback: postbit wrappers
+  const postbits = document.querySelectorAll('[id^="post"]');
+  const actualPosts = [...postbits].filter(el => /^post\d+$/.test(el.id));
+  if (actualPosts.length > 0) {
+    console.log('Polileo: countPostsInDOM found', actualPosts.length, 'posts via post wrapper');
+    return actualPosts.length;
+  }
+
+  console.log('Polileo: countPostsInDOM found 0 posts!');
   return 0;
 }
 
@@ -791,11 +832,70 @@ function showPoleDetectedNotification(poleAuthor) {
 }
 
 // Listen for notifications from background
-chrome.runtime.onMessage.addListener((msg) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'poleDetected' && !poleAlreadyDetected) {
     showPoleDetectedNotification(msg.poleAuthor);
   } else if (msg.action === 'windowStatusChanged') {
     updateButton(msg.isActive);
+  } else if (msg.action === 'checkAndRegister') {
+    // GUARDRAIL: Background is asking us to verify/register this thread
+    checkAndRegisterThread();
+    sendResponse({ success: true });
+  }
+  return true;  // Keep channel open for async response
+});
+
+// ============================================
+// GUARDRAIL: Check and register thread if needed
+// ============================================
+
+function checkAndRegisterThread() {
+  const tid = getThreadId();
+  if (!tid) return;
+
+  // Don't re-register if already done
+  if (isRegistered) {
+    console.log('Polileo: [GUARDRAIL] Thread', tid, 'already registered, skipping');
+    return;
+  }
+
+  // Don't register if pole already detected
+  if (poleAlreadyDetected) {
+    console.log('Polileo: [GUARDRAIL] Pole already detected, skipping registration');
+    return;
+  }
+
+  const postCount = countPostsInDOM();
+  console.log('Polileo: [GUARDRAIL] Checking thread', tid, '- posts:', postCount);
+
+  if (postCount === 1) {
+    console.log('Polileo: [GUARDRAIL] Thread', tid, 'has no pole - registering for watching');
+    isRegistered = true;
+
+    safeSendMessage({
+      action: 'watchThread',
+      threadId: tid,
+      initialCount: postCount
+    }, (response) => {
+      if (response?.success) {
+        console.log('Polileo: [GUARDRAIL] ✓ Thread', tid, 'registered');
+      }
+    });
+  } else if (postCount > 1) {
+    console.log('Polileo: [GUARDRAIL] Thread', tid, 'already has pole (', postCount, 'posts)');
+    // Mark so we don't keep checking
+    safeSendMessage({ action: 'polileoPageHasPole', hasPole: true });
+  }
+}
+
+// GUARDRAIL: Re-check on visibility change
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    const tid = getThreadId();
+    if (tid && !poleAlreadyDetected && !isRegistered) {
+      console.log('Polileo: [GUARDRAIL] Tab became visible - checking registration');
+      setTimeout(checkAndRegisterThread, 100);
+    }
   }
 });
 
