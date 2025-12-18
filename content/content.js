@@ -191,7 +191,7 @@ document.addEventListener('keydown', (e) => {
 
   // Check submitReply hotkey (allow even when typing)
   if (matchesHotkey(e, currentHotkeys.submitReply)) {
-    const submitBtn = document.getElementById('qr_submit');
+    const submitBtn = getSubmitButton();
     if (submitBtn && !submitBtn.disabled) {
       e.preventDefault();
       submitBtn.click();
@@ -238,6 +238,23 @@ function getEditorIframe() {
          document.querySelector('#vB_Editor_QR_editor');
 }
 
+// Get the submit button (quick reply OR full editor)
+function getSubmitButton() {
+  // Quick reply submit
+  const qrSubmit = document.getElementById('qr_submit');
+  if (qrSubmit) return qrSubmit;
+
+  // Full editor submit (vB_Editor_001_save, vB_Editor_002_save, etc.)
+  const fullSubmit = document.querySelector('input[id*="vB_Editor"][id*="_save"]');
+  if (fullSubmit) return fullSubmit;
+
+  // Fallback: any submit with name="sbutton"
+  const sbutton = document.querySelector('input[name="sbutton"]');
+  if (sbutton) return sbutton;
+
+  return null;
+}
+
 // Inject hotkey listener into iframe for submit hotkey
 function injectIframeHotkeyListener() {
   const iframe = getEditorIframe();
@@ -251,7 +268,7 @@ function injectIframeHotkeyListener() {
     iframeDoc.addEventListener('keydown', (e) => {
       // Check submitReply hotkey
       if (matchesHotkey(e, currentHotkeys.submitReply)) {
-        const submitBtn = document.getElementById('qr_submit');
+        const submitBtn = getSubmitButton();
         if (submitBtn && !submitBtn.disabled) {
           e.preventDefault();
           submitBtn.click();
