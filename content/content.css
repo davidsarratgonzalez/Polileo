@@ -72,12 +72,13 @@
 
 #polileo-lock-btn.unlocked {
   background: #e0e0e0;
-  color: #888;
+  color: #999;
 }
 
 #polileo-lock-btn.locked {
-  background: #bdbdbd;
-  color: #555;
+  background: linear-gradient(135deg, #ffd700, #daa520);
+  color: #5c4a00;
+  box-shadow: 0 2px 8px rgba(218, 165, 32, 0.4);
 }
 
 /* New replies notification - speech bubble */

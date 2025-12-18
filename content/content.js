@@ -26,9 +26,14 @@ function loadLockState() {
     updateLockButton(localLockState);
   } else {
     // Non-polileo pages use stored preference (default: unlocked)
-    chrome.storage.local.get(['focusLockManual'], (result) => {
-      updateLockButton(result.focusLockManual || false);
-    });
+    try {
+      chrome.storage.local.get(['focusLockManual'], (result) => {
+        if (chrome.runtime.lastError) return;
+        updateLockButton(result.focusLockManual || false);
+      });
+    } catch {
+      // Extension context invalidated
+    }
   }
 }
 loadLockState();
@@ -41,11 +46,16 @@ lockBtn.addEventListener('click', () => {
     updateLockButton(localLockState);
   } else {
     // Non-polileo pages: toggle and save to storage
-    chrome.storage.local.get(['focusLockManual'], (result) => {
-      const newState = !(result.focusLockManual || false);
-      chrome.storage.local.set({ focusLockManual: newState });
-      updateLockButton(newState);
-    });
+    try {
+      chrome.storage.local.get(['focusLockManual'], (result) => {
+        if (chrome.runtime.lastError) return;
+        const newState = !(result.focusLockManual || false);
+        chrome.storage.local.set({ focusLockManual: newState });
+        updateLockButton(newState);
+      });
+    } catch {
+      // Extension context invalidated
+    }
   }
 });
 
@@ -93,23 +103,27 @@ updateButtonPosition();
 window.addEventListener('resize', updateButtonPosition);
 
 // Get initial state
-chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
+safeSendMessage({ action: 'getStatus' }, (response) => {
   if (response) updateButton(response.isActive);
 });
 
 // Listen for state changes from other tabs in same window
-chrome.storage.onChanged.addListener((changes) => {
-  if (changes.windowStates) {
-    // Re-fetch status for this window
-    chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
-      if (response) updateButton(response.isActive);
-    });
-  }
-});
+try {
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes.windowStates) {
+      // Re-fetch status for this window
+      safeSendMessage({ action: 'getStatus' }, (response) => {
+        if (response) updateButton(response.isActive);
+      });
+    }
+  });
+} catch {
+  // Extension context invalidated
+}
 
 // Toggle on click
 btn.addEventListener('click', () => {
-  chrome.runtime.sendMessage({ action: 'toggle' }, (response) => {
+  safeSendMessage({ action: 'toggle' }, (response) => {
     if (response) updateButton(response.isActive);
   });
 });
@@ -186,7 +200,11 @@ function setupPostDetector() {
         if (postAuthor && currentUser &&
             postAuthor.toLowerCase() === currentUser.toLowerCase()) {
           console.log('Polileo: This is OUR post! Starting cooldown');
-          chrome.storage.local.set({ lastPostTime: Date.now() });
+          try {
+            chrome.storage.local.set({ lastPostTime: Date.now() });
+          } catch {
+            // Extension context invalidated
+          }
           showCooldownBar();
         }
       }
@@ -238,33 +256,37 @@ function positionCooldownBar() {
 
 // Show and update the cooldown bar
 function showCooldownBar() {
-  chrome.storage.local.get(['lastPostTime'], (result) => {
-    if (!result.lastPostTime) return;
+  try {
+    chrome.storage.local.get(['lastPostTime'], (result) => {
+      if (chrome.runtime.lastError || !result.lastPostTime) return;
 
-    const elapsed = Date.now() - result.lastPostTime;
-    const remaining = COOLDOWN_DURATION - elapsed;
+      const elapsed = Date.now() - result.lastPostTime;
+      const remaining = COOLDOWN_DURATION - elapsed;
 
-    if (remaining <= 0) {
-      // Cooldown finished
-      const bar = document.getElementById('polileo-cooldown');
-      if (bar) bar.remove();
-      return;
-    }
+      if (remaining <= 0) {
+        // Cooldown finished
+        const bar = document.getElementById('polileo-cooldown');
+        if (bar) bar.remove();
+        return;
+      }
 
-    // Create bar if needed
-    createCooldownBar();
-    const progress = document.getElementById('polileo-cooldown-progress');
-    const text = document.getElementById('polileo-cooldown-text');
+      // Create bar if needed
+      createCooldownBar();
+      const progress = document.getElementById('polileo-cooldown-progress');
+      const text = document.getElementById('polileo-cooldown-text');
 
-    const percentage = (remaining / COOLDOWN_DURATION) * 100;
-    const secondsLeft = Math.ceil(remaining / 1000);
+      const percentage = (remaining / COOLDOWN_DURATION) * 100;
+      const secondsLeft = Math.ceil(remaining / 1000);
 
-    progress.style.width = percentage + '%';
-    text.textContent = secondsLeft + 's';
+      progress.style.width = percentage + '%';
+      text.textContent = secondsLeft + 's';
 
-    // Continue updating
-    requestAnimationFrame(() => setTimeout(showCooldownBar, 100));
-  });
+      // Continue updating
+      requestAnimationFrame(() => setTimeout(showCooldownBar, 100));
+    });
+  } catch {
+    // Extension context invalidated
+  }
 }
 
 // Update cooldown bar position on resize
@@ -289,10 +311,16 @@ if (threadId) {
   if (initialPostCount === 1) {
     console.log('Polileo: No pole yet! Enabling anti-fail features...');
 
-    chrome.storage.local.get(['antifailDefault'], (result) => {
-      const antifailEnabled = result.antifailDefault !== false;
-      injectAntiFailCheckbox(antifailEnabled);
-    });
+    try {
+      chrome.storage.local.get(['antifailDefault'], (result) => {
+        if (chrome.runtime.lastError) return;
+        const antifailEnabled = result.antifailDefault !== false;
+        injectAntiFailCheckbox(antifailEnabled);
+      });
+    } catch {
+      // Extension context invalidated - use default
+      injectAntiFailCheckbox(true);
+    }
 
     safeSendMessage({
       action: 'watchThread',
