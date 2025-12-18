@@ -492,7 +492,7 @@ function setupSubmitDetector() {
 }
 setupSubmitDetector();
 
-// Create cooldown bar element
+// Create cooldown bar element - inline next to submit button
 function createCooldownBar() {
   if (document.getElementById('polileo-cooldown')) {
     return document.getElementById('polileo-cooldown');
@@ -501,23 +501,28 @@ function createCooldownBar() {
   const bar = document.createElement('div');
   bar.id = 'polileo-cooldown';
   bar.innerHTML = `
-    <div id="polileo-cooldown-progress"></div>
-    <span id="polileo-cooldown-text"></span>
+    <span id="polileo-cooldown-label">Cooldown</span>
+    <div id="polileo-cooldown-timer">
+      <span id="polileo-cooldown-text">30.0s</span>
+      <div id="polileo-cooldown-progress-container">
+        <div id="polileo-cooldown-progress"></div>
+      </div>
+    </div>
   `;
-  document.body.appendChild(bar);
 
-  // Position below the Polileo button
-  positionCooldownBar();
+  // Insert next to submit button if possible, otherwise near anti-fail checkbox
+  const submitBtn = document.getElementById('qr_submit');
+  const antifailContainer = document.getElementById('polileo-antifail-container');
+
+  if (antifailContainer) {
+    antifailContainer.parentNode.insertBefore(bar, antifailContainer);
+  } else if (submitBtn) {
+    submitBtn.parentNode.insertBefore(bar, submitBtn);
+  } else {
+    document.body.appendChild(bar);
+  }
+
   return bar;
-}
-
-function positionCooldownBar() {
-  const bar = document.getElementById('polileo-cooldown');
-  if (!bar) return;
-
-  const btnRect = btn.getBoundingClientRect();
-  bar.style.top = (btnRect.bottom + 10) + 'px';
-  bar.style.left = (btnRect.left + (btnRect.width - 50) / 2) + 'px';
 }
 
 // Show and update the cooldown bar
@@ -544,7 +549,7 @@ function showCooldownBar() {
       const text = document.getElementById('polileo-cooldown-text');
 
       const percentage = (remaining / COOLDOWN_DURATION) * 100;
-      const secondsLeft = Math.ceil(remaining / 1000);
+      const secondsLeft = (remaining / 1000).toFixed(1);
 
       progress.style.width = percentage + '%';
       text.textContent = secondsLeft + 's';
@@ -557,8 +562,6 @@ function showCooldownBar() {
   }
 }
 
-// Update cooldown bar position on resize
-window.addEventListener('resize', positionCooldownBar);
 
 // Initialize cooldown tracking (always active)
 showCooldownBar(); // Show existing cooldown if any
