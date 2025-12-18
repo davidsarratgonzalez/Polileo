@@ -96,6 +96,84 @@ function updateLockButton(isLocked) {
   lockBtn.className = isLocked ? 'locked' : 'unlocked';
 }
 
+// ============================================
+// Hotkey handling
+// ============================================
+
+const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+
+const defaultHotkeys = {
+  toggleLock: { key: 'Escape', ctrl: false, alt: false, meta: false, shift: false },
+  submitReply: isMac
+    ? { key: 's', ctrl: false, alt: false, meta: true, shift: false }
+    : { key: 's', ctrl: false, alt: true, meta: false, shift: false }
+};
+
+let currentHotkeys = { ...defaultHotkeys };
+
+// Load hotkeys from storage
+function loadHotkeys() {
+  if (!isExtensionContextValid()) return;
+  try {
+    chrome.storage.local.get(['hotkeys'], (result) => {
+      if (chrome.runtime.lastError) return;
+      if (result.hotkeys) {
+        currentHotkeys = { ...defaultHotkeys, ...result.hotkeys };
+      }
+    });
+  } catch {
+    // Extension context invalidated
+  }
+}
+loadHotkeys();
+
+// Listen for hotkey changes
+try {
+  chrome.storage.onChanged.addListener((changes) => {
+    if (!isExtensionContextValid()) return;
+    if (changes.hotkeys) {
+      currentHotkeys = { ...defaultHotkeys, ...changes.hotkeys.newValue };
+    }
+  });
+} catch {
+  // Extension context invalidated
+}
+
+// Hotkey listener
+document.addEventListener('keydown', (e) => {
+  // Don't trigger hotkeys when typing in input fields (except submit hotkey)
+  const isTyping = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
+
+  // Check toggleLock hotkey
+  if (matchesHotkey(e, currentHotkeys.toggleLock) && !isTyping) {
+    e.preventDefault();
+    lockBtn.click();
+    return;
+  }
+
+  // Check submitReply hotkey (allow even when typing)
+  if (matchesHotkey(e, currentHotkeys.submitReply)) {
+    const submitBtn = document.getElementById('qr_submit');
+    if (submitBtn && !submitBtn.disabled) {
+      e.preventDefault();
+      submitBtn.click();
+    }
+    return;
+  }
+});
+
+function matchesHotkey(event, hotkey) {
+  if (!hotkey) return false;
+
+  const keyMatches = event.key.toLowerCase() === hotkey.key.toLowerCase();
+  const ctrlMatches = event.ctrlKey === hotkey.ctrl;
+  const altMatches = event.altKey === hotkey.alt;
+  const metaMatches = event.metaKey === hotkey.meta;
+  const shiftMatches = event.shiftKey === hotkey.shift;
+
+  return keyMatches && ctrlMatches && altMatches && metaMatches && shiftMatches;
+}
+
 // Position button below subheader (if exists) or header, aligned with avatar
 function updateButtonPosition() {
   const subheader = document.getElementById('subheader');
