@@ -1,9 +1,46 @@
 const FOROCOCHES_URL = 'https://www.forocoches.com/foro/forumdisplay.php?f=2';
-const POLL_INTERVAL = 500;
-const THREAD_WATCH_INTERVAL = 500;
 const ALARM_NAME = 'polileo-keepalive';
 const THREAD_WATCH_ALARM = 'polileo-thread-watch';
 const MAX_OPENED_THREADS = 100;
+
+// Timing defaults
+const DEFAULT_TIMINGS = {
+  pollInterval: 500,       // 500ms for forum polling
+  threadWatchFast: 500,    // 500ms for active thread
+  threadWatchSlow: 1000    // 1s for other threads
+};
+
+// Current timing values (loaded from storage)
+let POLL_INTERVAL = DEFAULT_TIMINGS.pollInterval;
+let THREAD_WATCH_FAST = DEFAULT_TIMINGS.threadWatchFast;
+let THREAD_WATCH_SLOW = DEFAULT_TIMINGS.threadWatchSlow;
+
+// Load timing settings from storage
+chrome.storage.local.get(['timings'], (result) => {
+  if (result.timings) {
+    POLL_INTERVAL = result.timings.pollInterval || DEFAULT_TIMINGS.pollInterval;
+    THREAD_WATCH_FAST = result.timings.threadWatchFast || DEFAULT_TIMINGS.threadWatchFast;
+    THREAD_WATCH_SLOW = result.timings.threadWatchSlow || DEFAULT_TIMINGS.threadWatchSlow;
+    console.log('Polileo BG: Loaded timings - poll:', POLL_INTERVAL, 'fast:', THREAD_WATCH_FAST, 'slow:', THREAD_WATCH_SLOW);
+  }
+});
+
+// Listen for timing changes
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.timings) {
+    const newTimings = changes.timings.newValue || DEFAULT_TIMINGS;
+    POLL_INTERVAL = newTimings.pollInterval || DEFAULT_TIMINGS.pollInterval;
+    THREAD_WATCH_FAST = newTimings.threadWatchFast || DEFAULT_TIMINGS.threadWatchFast;
+    THREAD_WATCH_SLOW = newTimings.threadWatchSlow || DEFAULT_TIMINGS.threadWatchSlow;
+    console.log('Polileo BG: Timings updated - poll:', POLL_INTERVAL, 'fast:', THREAD_WATCH_FAST, 'slow:', THREAD_WATCH_SLOW);
+
+    // Restart timers with new values if watching
+    if (watchedThreads.size > 0) {
+      stopThreadWatching();
+      startThreadWatching();
+    }
+  }
+});
 
 // Per-window state: { windowId: { isActive, openedThreads } }
 const windowStates = new Map();
@@ -11,7 +48,8 @@ let pollTimer = null;
 
 // Thread watching: { threadId: { tabId, initialCount, lastNotifiedCount } }
 const watchedThreads = new Map();
-let threadWatchTimer = null;
+let threadWatchFastTimer = null;  // Fast timer for active tab
+let threadWatchSlowTimer = null;  // Slow timer for all threads
 
 // Track tabs where pole was already taken (so we don't force lock on them)
 const tabsWithPole = new Set();
@@ -57,10 +95,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     poll();
   } else if (alarm.name === THREAD_WATCH_ALARM) {
     // Alarm fired - service worker may have been idle
-    // Restart the setTimeout chain if there are threads to watch
+    // Restart the setTimeout chains if there are threads to watch
     console.log('Polileo BG: Thread watch alarm fired, threads:', watchedThreads.size);
-    if (watchedThreads.size > 0 && !threadWatchTimer) {
-      scheduleThreadCheck();
+    if (watchedThreads.size > 0) {
+      if (!threadWatchFastTimer) scheduleFastCheck();
+      if (!threadWatchSlowTimer) scheduleSlowCheck();
     }
   }
 });
@@ -339,108 +378,140 @@ async function updateBadge(windowId) {
 // ============================================
 
 function startThreadWatching() {
-  if (threadWatchTimer) {
+  if (threadWatchFastTimer && threadWatchSlowTimer) {
     console.log('Polileo BG: Thread watcher already running');
     return;
   }
-  console.log('Polileo BG: Starting thread watcher (interval:', THREAD_WATCH_INTERVAL, 'ms)');
+  console.log('Polileo BG: Starting thread watcher (fast:', THREAD_WATCH_FAST, 'ms, slow:', THREAD_WATCH_SLOW, 'ms)');
   // Create alarm to keep service worker alive (minimum 0.5 min = 30 sec)
   chrome.alarms.create(THREAD_WATCH_ALARM, { periodInMinutes: 0.5 });
-  // Use setTimeout chain for fast polling
-  scheduleThreadCheck();
+  // Start both timers
+  scheduleFastCheck();
+  scheduleSlowCheck();
 }
 
-function scheduleThreadCheck() {
+function scheduleFastCheck() {
   if (watchedThreads.size === 0) {
     stopThreadWatching();
     return;
   }
-  threadWatchTimer = setTimeout(async () => {
-    await checkWatchedThreads();
-    scheduleThreadCheck();
-  }, THREAD_WATCH_INTERVAL);
+  threadWatchFastTimer = setTimeout(async () => {
+    await checkActiveThread();
+    scheduleFastCheck();
+  }, THREAD_WATCH_FAST);
+}
+
+function scheduleSlowCheck() {
+  if (watchedThreads.size === 0) {
+    stopThreadWatching();
+    return;
+  }
+  threadWatchSlowTimer = setTimeout(async () => {
+    await checkAllThreads();
+    scheduleSlowCheck();
+  }, THREAD_WATCH_SLOW);
 }
 
 function stopThreadWatching() {
   console.log('Polileo BG: Stopping thread watcher');
-  if (threadWatchTimer) {
-    clearTimeout(threadWatchTimer);
-    threadWatchTimer = null;
+  if (threadWatchFastTimer) {
+    clearTimeout(threadWatchFastTimer);
+    threadWatchFastTimer = null;
+  }
+  if (threadWatchSlowTimer) {
+    clearTimeout(threadWatchSlowTimer);
+    threadWatchSlowTimer = null;
   }
   chrome.alarms.clear(THREAD_WATCH_ALARM);
 }
 
-async function checkWatchedThreads() {
-  console.log('Polileo BG: Checking', watchedThreads.size, 'watched threads');
-  if (watchedThreads.size === 0) {
+// Fast check: only the active tab's thread (every 500ms)
+async function checkActiveThread() {
+  if (watchedThreads.size === 0) return;
+
+  // Find active tab
+  let activeTabId = null;
+  try {
+    let tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tabs.length) tabs = await chrome.tabs.query({ active: true });
+    activeTabId = tabs[0]?.id;
+  } catch {
     return;
   }
 
-  // Only poll the thread from the active tab to avoid rate limiting
-  let activeTabId = null;
-  try {
-    const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    activeTabId = activeTab?.id;
-    console.log('Polileo BG: Active tab is', activeTabId);
-  } catch (e) {
-    console.log('Polileo BG: Could not get active tab', e);
+  // Find thread for active tab
+  for (const [threadId, info] of watchedThreads) {
+    if (info.tabId === activeTabId) {
+      await checkSingleThread(threadId, info);
+      break;
+    }
   }
+}
+
+// Slow check: all threads (every 2 seconds)
+async function checkAllThreads() {
+  if (watchedThreads.size === 0) return;
+
+  console.log('Polileo BG: Checking all', watchedThreads.size, 'threads');
+  const threadsToRemove = [];
 
   for (const [threadId, info] of watchedThreads) {
+    // Check if tab still exists
     try {
-      // Check if tab still exists
-      try {
-        await chrome.tabs.get(info.tabId);
-      } catch {
-        console.log('Polileo: Tab no longer exists for thread', threadId);
-        watchedThreads.delete(threadId);
-        continue;
-      }
-
-      // Skip if this is not the active tab
-      if (info.tabId !== activeTabId) {
-        continue;
-      }
-
-      // Fetch the thread
-      const resp = await fetch(
-        `https://www.forocoches.com/foro/showthread.php?t=${threadId}&_=${Date.now()}`,
-        { credentials: 'include', cache: 'no-store' }
-      );
-
-      if (!resp.ok) {
-        console.log('Polileo: Fetch failed for thread', threadId, 'status:', resp.status);
-        continue;
-      }
-
-      const html = await resp.text();
-      const currentCount = countPostsInHtml(html);
-      console.log('Polileo: Thread', threadId, 'has', currentCount, 'posts (initial:', info.initialCount, ')');
-
-      // If more than 1 post, someone got the pole - notify and stop monitoring
-      if (currentCount > 1) {
-        // Extract the username of who got the pole
-        const poleAuthor = extractPoleAuthor(html);
-        console.log('Polileo: Pole detected! Author:', poleAuthor);
-
-        // Send notification to the tab
-        chrome.tabs.sendMessage(info.tabId, {
-          action: 'poleDetected',
-          currentCount: currentCount,
-          poleAuthor: poleAuthor
-        }).catch(() => {
-          // Tab might be closed or navigated away
-          console.log('Polileo: Could not send message to tab', info.tabId);
-        });
-
-        // Stop monitoring this thread
-        watchedThreads.delete(threadId);
-        saveWatchedThreads();
-        console.log('Polileo: Stopped monitoring thread', threadId);
-      }
-    } catch (e) {
-      console.log('Polileo: Error checking thread', threadId, e);
+      await chrome.tabs.get(info.tabId);
+    } catch {
+      console.log('Polileo: Tab closed for thread', threadId);
+      threadsToRemove.push(threadId);
+      continue;
     }
+
+    await checkSingleThread(threadId, info);
+  }
+
+  // Cleanup
+  for (const threadId of threadsToRemove) {
+    watchedThreads.delete(threadId);
+  }
+  if (threadsToRemove.length > 0) {
+    saveWatchedThreads();
+  }
+}
+
+// Check a single thread for pole
+async function checkSingleThread(threadId, info) {
+  try {
+    const resp = await fetch(
+      `https://www.forocoches.com/foro/showthread.php?t=${threadId}&_=${Date.now()}`,
+      { credentials: 'include', cache: 'no-store' }
+    );
+
+    if (!resp.ok) {
+      console.log('Polileo: Fetch failed for', threadId);
+      return;
+    }
+
+    const html = await resp.text();
+    const currentCount = countPostsInHtml(html);
+
+    if (currentCount > 1) {
+      const poleAuthor = extractPoleAuthor(html);
+      console.log('Polileo: *** POLE DETECTED *** Thread:', threadId, 'Author:', poleAuthor);
+
+      // Notify the tab
+      chrome.tabs.sendMessage(info.tabId, {
+        action: 'poleDetected',
+        currentCount: currentCount,
+        poleAuthor: poleAuthor
+      }).catch(() => {
+        console.log('Polileo: Could not notify tab', info.tabId);
+      });
+
+      // Stop monitoring
+      watchedThreads.delete(threadId);
+      saveWatchedThreads();
+    }
+  } catch (e) {
+    console.log('Polileo: Error checking', threadId, e);
   }
 }
 

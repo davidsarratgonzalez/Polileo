@@ -32,8 +32,36 @@ const hasNoPoleYet = initialPostCount === 1;
 console.log('Polileo: Page load check - isPolileoPage:', isPolileoPage, 'posts:', initialPostCount, 'hasNoPoleYet:', hasNoPoleYet);
 
 // Local lock state for this page
-// Only auto-lock on polileo pages that still have no pole
-let localLockState = isPolileoPage && hasNoPoleYet;
+let localLockState = false;
+let useLocalLockState = false; // Whether to use local state or global
+
+// Initialize lock state based on settings
+function initLockState() {
+  try {
+    chrome.storage.local.get(['autoLockDisabled', 'focusLockManual'], (result) => {
+      if (chrome.runtime.lastError) return;
+
+      const autoLockDisabled = result.autoLockDisabled || false;
+
+      // Determine if we should use local lock state
+      if (isPolileoPage && hasNoPoleYet && !autoLockDisabled) {
+        // Auto-lock on polileo pages (unless disabled in settings)
+        useLocalLockState = true;
+        localLockState = true;
+        updateLockButton(true);
+      } else {
+        // Use global lock state
+        useLocalLockState = false;
+        updateLockButton(result.focusLockManual || false);
+      }
+
+      console.log('Polileo: Lock state initialized - useLocal:', useLocalLockState, 'autoLockDisabled:', autoLockDisabled);
+    });
+  } catch {
+    // Extension context invalidated
+  }
+}
+initLockState();
 
 // Tell background if this polileo page already has a pole
 if (isPolileoPage && !hasNoPoleYet) {
@@ -41,13 +69,11 @@ if (isPolileoPage && !hasNoPoleYet) {
   safeSendMessage({ action: 'polileoPageHasPole', hasPole: true });
 }
 
-// Get initial lock state
+// Reload lock state (for visibility changes)
 function loadLockState() {
-  if (isPolileoPage && hasNoPoleYet) {
-    // Polileo pages with no pole yet start locked
+  if (useLocalLockState) {
     updateLockButton(localLockState);
   } else {
-    // All other pages (including polileo with pole) use stored preference
     try {
       chrome.storage.local.get(['focusLockManual'], (result) => {
         if (chrome.runtime.lastError) return;
@@ -58,16 +84,15 @@ function loadLockState() {
     }
   }
 }
-loadLockState();
 
 // Toggle lock on click
 lockBtn.addEventListener('click', () => {
-  if (isPolileoPage && hasNoPoleYet) {
-    // Polileo pages with no pole: toggle local state only (doesn't persist)
+  if (useLocalLockState) {
+    // Local state only (doesn't persist) - used on polileo pages when auto-lock is enabled
     localLockState = !localLockState;
     updateLockButton(localLockState);
   } else {
-    // All other pages: toggle and save to storage
+    // Global state: toggle and save to storage
     try {
       chrome.storage.local.get(['focusLockManual'], (result) => {
         if (chrome.runtime.lastError) return;
@@ -83,7 +108,7 @@ lockBtn.addEventListener('click', () => {
 
 // Re-check when tab becomes visible (for pages using global state)
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !(isPolileoPage && hasNoPoleYet)) {
+  if (document.visibilityState === 'visible' && !useLocalLockState) {
     loadLockState();
   }
 });
@@ -414,6 +439,38 @@ function setupPostDetector() {
 
 // Initialize post detector
 setupPostDetector();
+
+// Backup: also detect when submit button is clicked
+function setupSubmitDetector() {
+  const submitBtn = document.getElementById('qr_submit');
+  if (!submitBtn) return;
+
+  submitBtn.addEventListener('click', () => {
+    console.log('Polileo: Submit button clicked, will check for cooldown in 2s');
+    // Wait a bit for the post to be submitted, then start cooldown
+    setTimeout(() => {
+      if (!isExtensionContextValid()) return;
+      // Check if a new post was added (the MutationObserver should have caught it, but just in case)
+      try {
+        chrome.storage.local.get(['lastPostTime'], (result) => {
+          if (chrome.runtime.lastError) return;
+          // If no recent post (within last 5 seconds), assume this click resulted in a post
+          const timeSinceLastPost = Date.now() - (result.lastPostTime || 0);
+          if (timeSinceLastPost > 5000) {
+            console.log('Polileo: Submit click backup - starting cooldown');
+            chrome.storage.local.set({ lastPostTime: Date.now() });
+            showCooldownBar();
+          }
+        });
+      } catch {
+        // Extension context invalidated
+      }
+    }, 2000);
+  });
+
+  console.log('Polileo: Submit detector initialized');
+}
+setupSubmitDetector();
 
 // Create cooldown bar element
 function createCooldownBar() {

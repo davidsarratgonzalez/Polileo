@@ -2,9 +2,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const toggleBtn = document.getElementById('toggleBtn');
   const statusEl = document.getElementById('status');
   const antifailDefaultEl = document.getElementById('antifailDefault');
+  const autoLockDisabledEl = document.getElementById('autoLockDisabled');
   const hotkeyLockEl = document.getElementById('hotkeyLock');
   const hotkeyFocusEl = document.getElementById('hotkeyFocus');
   const hotkeySubmitEl = document.getElementById('hotkeySubmit');
+
+  // Advanced config elements
+  const advancedToggle = document.getElementById('advancedToggle');
+  const advancedContent = document.getElementById('advancedContent');
+  const pollIntervalEl = document.getElementById('pollInterval');
+  const threadWatchFastEl = document.getElementById('threadWatchFast');
+  const threadWatchSlowEl = document.getElementById('threadWatchSlow');
+  const pollIntervalValueEl = document.getElementById('pollIntervalValue');
+  const threadWatchFastValueEl = document.getElementById('threadWatchFastValue');
+  const threadWatchSlowValueEl = document.getElementById('threadWatchSlowValue');
 
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 
@@ -17,6 +28,13 @@ document.addEventListener('DOMContentLoaded', () => {
       : { key: 's', ctrl: false, alt: true, meta: false, shift: false }
   };
 
+  // Default timing values
+  const defaultTimings = {
+    pollInterval: 500,       // 500ms for forum polling
+    threadWatchFast: 500,    // 500ms for active thread
+    threadWatchSlow: 1000    // 1s for other threads
+  };
+
   let recordingElement = null;
 
   // Get initial status
@@ -27,19 +45,68 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load settings
-  chrome.storage.local.get(['antifailDefault', 'hotkeys'], (result) => {
+  chrome.storage.local.get(['antifailDefault', 'autoLockDisabled', 'hotkeys', 'timings'], (result) => {
     antifailDefaultEl.checked = result.antifailDefault !== false;
+    autoLockDisabledEl.checked = result.autoLockDisabled || false;
 
     const hotkeys = result.hotkeys || defaultHotkeys;
     updateHotkeyDisplay(hotkeyLockEl, hotkeys.toggleLock || defaultHotkeys.toggleLock);
     updateHotkeyDisplay(hotkeyFocusEl, hotkeys.focusReply || defaultHotkeys.focusReply);
     updateHotkeyDisplay(hotkeySubmitEl, hotkeys.submitReply || defaultHotkeys.submitReply);
+
+    // Load timing settings
+    const timings = result.timings || defaultTimings;
+    pollIntervalEl.value = timings.pollInterval || defaultTimings.pollInterval;
+    threadWatchFastEl.value = timings.threadWatchFast || defaultTimings.threadWatchFast;
+    threadWatchSlowEl.value = timings.threadWatchSlow || defaultTimings.threadWatchSlow;
+    updateSliderDisplay(pollIntervalEl, pollIntervalValueEl);
+    updateSliderDisplay(threadWatchFastEl, threadWatchFastValueEl);
+    updateSliderDisplay(threadWatchSlowEl, threadWatchSlowValueEl);
   });
 
-  // Save antifail setting on change
+  // Save settings on change
   antifailDefaultEl.addEventListener('change', () => {
     chrome.storage.local.set({ antifailDefault: antifailDefaultEl.checked });
   });
+
+  autoLockDisabledEl.addEventListener('change', () => {
+    chrome.storage.local.set({ autoLockDisabled: autoLockDisabledEl.checked });
+  });
+
+  // Advanced toggle
+  advancedToggle.addEventListener('click', () => {
+    advancedToggle.classList.toggle('open');
+    advancedContent.classList.toggle('open');
+  });
+
+  // Slider change handlers
+  pollIntervalEl.addEventListener('input', () => {
+    updateSliderDisplay(pollIntervalEl, pollIntervalValueEl);
+    saveTimings();
+  });
+
+  threadWatchFastEl.addEventListener('input', () => {
+    updateSliderDisplay(threadWatchFastEl, threadWatchFastValueEl);
+    saveTimings();
+  });
+
+  threadWatchSlowEl.addEventListener('input', () => {
+    updateSliderDisplay(threadWatchSlowEl, threadWatchSlowValueEl);
+    saveTimings();
+  });
+
+  function updateSliderDisplay(slider, valueEl) {
+    valueEl.textContent = slider.value + 'ms';
+  }
+
+  function saveTimings() {
+    const timings = {
+      pollInterval: parseInt(pollIntervalEl.value),
+      threadWatchFast: parseInt(threadWatchFastEl.value),
+      threadWatchSlow: parseInt(threadWatchSlowEl.value)
+    };
+    chrome.storage.local.set({ timings });
+  }
 
   // Toggle button click
   toggleBtn.addEventListener('click', () => {

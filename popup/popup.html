@@ -26,6 +26,12 @@
           <span>Anti-fail activado por defecto</span>
         </label>
       </div>
+      <div class="setting-item">
+        <label for="autoLockDisabled">
+          <input type="checkbox" id="autoLockDisabled">
+          <span>No forzar candado en hilos abiertos por Polileo</span>
+        </label>
+      </div>
     </div>
 
     <div class="settings-section">
@@ -43,6 +49,38 @@
         <button class="hotkey-input" id="hotkeySubmit" data-key="submitReply">Cmd+S / Alt+S</button>
       </div>
       <p class="hotkey-hint">Click para cambiar, Escape para cancelar</p>
+    </div>
+
+    <div class="settings-section">
+      <button class="advanced-toggle" id="advancedToggle">
+        <span class="toggle-icon">▶</span> Configuración avanzada
+      </button>
+      <div class="advanced-content" id="advancedContent">
+        <div class="slider-item">
+          <div class="slider-header">
+            <span class="slider-label">Polling foro</span>
+            <span class="slider-value" id="pollIntervalValue">500ms</span>
+          </div>
+          <input type="range" id="pollInterval" min="300" max="5000" step="100" value="500">
+          <p class="slider-hint">Intervalo para buscar nuevos hilos</p>
+        </div>
+        <div class="slider-item">
+          <div class="slider-header">
+            <span class="slider-label">Check hilo activo</span>
+            <span class="slider-value" id="threadWatchFastValue">500ms</span>
+          </div>
+          <input type="range" id="threadWatchFast" min="200" max="3000" step="50" value="500">
+          <p class="slider-hint">Polling del hilo en primer plano</p>
+        </div>
+        <div class="slider-item">
+          <div class="slider-header">
+            <span class="slider-label">Check otros hilos</span>
+            <span class="slider-value" id="threadWatchSlowValue">1000ms</span>
+          </div>
+          <input type="range" id="threadWatchSlow" min="500" max="10000" step="250" value="1000">
+          <p class="slider-hint">Polling de hilos en segundo plano</p>
+        </div>
+      </div>
     </div>
 
     <p class="info">
