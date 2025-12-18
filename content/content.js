@@ -36,6 +36,8 @@ function updateButton(isActive) {
 // Thread monitoring - detect new replies
 // ============================================
 
+let poleAlreadyDetected = false;
+
 // Check if we're on a thread page
 function getThreadId() {
   const match = window.location.href.match(/showthread\.php\?t=(\d+)/);
@@ -124,6 +126,9 @@ function injectAntiFailCheckbox(defaultEnabled) {
 
 // Show notification when pole detected
 function showPoleDetectedNotification() {
+  if (poleAlreadyDetected) return;
+  poleAlreadyDetected = true;
+
   const existing = document.getElementById('polebot-reply-alert');
   if (existing) existing.remove();
 
@@ -145,7 +150,7 @@ function showPoleDetectedNotification() {
 
 // Listen for notifications from background
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.action === 'poleDetected') {
+  if (msg.action === 'poleDetected' && !poleAlreadyDetected) {
     showPoleDetectedNotification();
   }
 });
