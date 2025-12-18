@@ -2,6 +2,7 @@ const FOROCOCHES_URL = 'https://www.forocoches.com/foro/forumdisplay.php?f=2';
 const POLL_INTERVAL = 500;
 const THREAD_WATCH_INTERVAL = 500;
 const ALARM_NAME = 'polebot-keepalive';
+const MAX_OPENED_THREADS = 100;
 
 // Per-window state: { windowId: { isActive, openedThreads } }
 const windowStates = new Map();
@@ -145,6 +146,11 @@ async function poll() {
         for (const pole of poles) {
           if (!state.openedThreads.has(pole.id)) {
             state.openedThreads.add(pole.id);
+            // Cleanup old threads if limit exceeded
+            while (state.openedThreads.size > MAX_OPENED_THREADS) {
+              const oldest = state.openedThreads.values().next().value;
+              state.openedThreads.delete(oldest);
+            }
             // Add polebot=1 param so content script knows this was auto-opened
             chrome.tabs.create({ url: `${pole.url}&polebot=1`, active: true, windowId });
           }

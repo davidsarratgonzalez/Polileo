@@ -1,6 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
   const toggleBtn = document.getElementById('toggleBtn');
-  const clearBtn = document.getElementById('clearBtn');
   const statusEl = document.getElementById('status');
   const antifailDefaultEl = document.getElementById('antifailDefault');
 
@@ -27,19 +26,6 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.runtime.sendMessage({ action: 'toggle' }, (response) => {
       if (response) {
         updateUI(response.isActive);
-      }
-    });
-  });
-
-  // Clear history button click
-  clearBtn.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ action: 'clearHistory' }, (response) => {
-      if (response && response.success) {
-        // Visual feedback
-        clearBtn.textContent = 'Cleared!';
-        setTimeout(() => {
-          clearBtn.textContent = 'Clear History';
-        }, 1500);
       }
     });
   });
