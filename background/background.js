@@ -1,10 +1,15 @@
 const FOROCOCHES_URL = 'https://www.forocoches.com/foro/forumdisplay.php?f=2';
 const POLL_INTERVAL = 500;
+const THREAD_WATCH_INTERVAL = 500;
 const ALARM_NAME = 'polebot-keepalive';
 
 // Per-window state: { windowId: { isActive, openedThreads } }
 const windowStates = new Map();
 let pollTimer = null;
+
+// Thread watching: { threadId: { tabId, initialCount, lastNotifiedCount } }
+const watchedThreads = new Map();
+let threadWatchTimer = null;
 
 // Load saved state on startup
 chrome.storage.local.get(['windowStates'], (result) => {
@@ -72,6 +77,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ success: true });
     });
     return true;
+  } else if (msg.action === 'watchThread') {
+    // Register a thread for monitoring
+    const tabId = sender.tab?.id;
+    if (tabId && msg.threadId) {
+      watchedThreads.set(msg.threadId, {
+        tabId: tabId,
+        initialCount: msg.initialCount || 0,
+        lastNotifiedCount: msg.initialCount || 0
+      });
+      startThreadWatching();
+    }
+    sendResponse({ success: true });
+    return true;
+  } else if (msg.action === 'unwatchThread') {
+    // Stop monitoring a thread
+    watchedThreads.delete(msg.threadId);
+    if (watchedThreads.size === 0) {
+      stopThreadWatching();
+    }
+    sendResponse({ success: true });
+    return true;
   }
 });
 
@@ -119,7 +145,8 @@ async function poll() {
         for (const pole of poles) {
           if (!state.openedThreads.has(pole.id)) {
             state.openedThreads.add(pole.id);
-            chrome.tabs.create({ url: pole.url, active: true, windowId });
+            // Add polebot=1 param so content script knows this was auto-opened
+            chrome.tabs.create({ url: `${pole.url}&polebot=1`, active: true, windowId });
           }
         }
       }
@@ -189,4 +216,78 @@ async function updateBadge(windowId) {
   } catch {
     // Window might not exist
   }
+}
+
+// ============================================
+// Thread watching - detect new replies
+// ============================================
+
+function startThreadWatching() {
+  if (threadWatchTimer) return;
+  threadWatchTimer = setInterval(checkWatchedThreads, THREAD_WATCH_INTERVAL);
+  checkWatchedThreads(); // Check immediately
+}
+
+function stopThreadWatching() {
+  if (threadWatchTimer) {
+    clearInterval(threadWatchTimer);
+    threadWatchTimer = null;
+  }
+}
+
+async function checkWatchedThreads() {
+  if (watchedThreads.size === 0) {
+    stopThreadWatching();
+    return;
+  }
+
+  for (const [threadId, info] of watchedThreads) {
+    try {
+      // Check if tab still exists
+      try {
+        await chrome.tabs.get(info.tabId);
+      } catch {
+        watchedThreads.delete(threadId);
+        continue;
+      }
+
+      // Fetch the thread
+      const resp = await fetch(
+        `https://www.forocoches.com/foro/showthread.php?t=${threadId}&_=${Date.now()}`,
+        { credentials: 'include', cache: 'no-store' }
+      );
+
+      if (!resp.ok) continue;
+
+      const html = await resp.text();
+      const currentCount = countPostsInHtml(html);
+
+      // If more than 1 post, someone got the pole - notify and stop monitoring
+      if (currentCount > 1) {
+        // Send notification to the tab
+        chrome.tabs.sendMessage(info.tabId, {
+          action: 'poleDetected',
+          currentCount: currentCount
+        });
+
+        // Stop monitoring this thread
+        watchedThreads.delete(threadId);
+        console.log('Polebot: Pole detected in thread', threadId, '- stopping monitor');
+      }
+    } catch {
+      // Network error or tab closed, continue
+    }
+  }
+}
+
+function countPostsInHtml(html) {
+  // Count post_message_ occurrences (most reliable for vBulletin)
+  const matches = html.match(/id="post_message_\d+"/g);
+  if (matches) return matches.length;
+
+  // Fallback: count postcount links
+  const postcountMatches = html.match(/id="postcount\d+"/g);
+  if (postcountMatches) return postcountMatches.length;
+
+  return 0;
 }
