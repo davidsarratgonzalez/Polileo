@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusEl = document.getElementById('status');
   const antifailDefaultEl = document.getElementById('antifailDefault');
   const hotkeyLockEl = document.getElementById('hotkeyLock');
+  const hotkeyFocusEl = document.getElementById('hotkeyFocus');
   const hotkeySubmitEl = document.getElementById('hotkeySubmit');
 
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -10,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Default hotkeys
   const defaultHotkeys = {
     toggleLock: { key: 'Escape', ctrl: false, alt: false, meta: false, shift: false },
+    focusReply: { key: 'r', ctrl: false, alt: false, meta: false, shift: false },
     submitReply: isMac
       ? { key: 's', ctrl: false, alt: false, meta: true, shift: false }
       : { key: 's', ctrl: false, alt: true, meta: false, shift: false }
@@ -30,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const hotkeys = result.hotkeys || defaultHotkeys;
     updateHotkeyDisplay(hotkeyLockEl, hotkeys.toggleLock || defaultHotkeys.toggleLock);
+    updateHotkeyDisplay(hotkeyFocusEl, hotkeys.focusReply || defaultHotkeys.focusReply);
     updateHotkeyDisplay(hotkeySubmitEl, hotkeys.submitReply || defaultHotkeys.submitReply);
   });
 
@@ -49,6 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Hotkey recording
   hotkeyLockEl.addEventListener('click', () => startRecording(hotkeyLockEl));
+  hotkeyFocusEl.addEventListener('click', () => startRecording(hotkeyFocusEl));
   hotkeySubmitEl.addEventListener('click', () => startRecording(hotkeySubmitEl));
 
   function startRecording(element) {
