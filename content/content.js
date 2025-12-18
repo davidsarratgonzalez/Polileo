@@ -1,3 +1,12 @@
+// Check if extension context is still valid
+function isExtensionContextValid() {
+  try {
+    return chrome.runtime && chrome.runtime.id;
+  } catch {
+    return false;
+  }
+}
+
 // Create floating button
 const btn = document.createElement('button');
 btn.id = 'polileo-btn';
@@ -119,6 +128,7 @@ safeSendMessage({ action: 'getStatus' }, (response) => {
 // Listen for state changes from other tabs in same window
 try {
   chrome.storage.onChanged.addListener((changes) => {
+    if (!isExtensionContextValid()) return;
     if (changes.windowStates) {
       // Re-fetch status for this window
       safeSendMessage({ action: 'getStatus' }, (response) => {
@@ -161,6 +171,12 @@ function setupPostDetector() {
 
   // Watch for new posts being added
   const observer = new MutationObserver((mutations) => {
+    // Stop if extension context is invalidated
+    if (!isExtensionContextValid()) {
+      observer.disconnect();
+      return;
+    }
+
     const newPostCount = countPostsInDOM();
 
     if (newPostCount > lastPostCount) {
@@ -265,9 +281,11 @@ function positionCooldownBar() {
 
 // Show and update the cooldown bar
 function showCooldownBar() {
+  if (!isExtensionContextValid()) return;
+
   try {
     chrome.storage.local.get(['lastPostTime'], (result) => {
-      if (chrome.runtime.lastError || !result.lastPostTime) return;
+      if (!isExtensionContextValid() || chrome.runtime.lastError || !result.lastPostTime) return;
 
       const elapsed = Date.now() - result.lastPostTime;
       const remaining = COOLDOWN_DURATION - elapsed;
@@ -562,9 +580,11 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 // Safe message sender (handles extension context invalidated)
 function safeSendMessage(msg, callback) {
+  if (!isExtensionContextValid()) return;
+
   try {
     chrome.runtime.sendMessage(msg, callback);
-  } catch (e) {
+  } catch {
     console.log('Polileo: Extension context invalidated');
   }
 }
