@@ -147,43 +147,116 @@ function injectAntiFailCheckbox(defaultEnabled) {
   });
 }
 
+// Get current user's name from header
+function getCurrentUsername() {
+  try {
+    // Method 1: Look for .username in header area
+    const headerUsername = document.querySelector('.user-profile-menu-header .username');
+    if (headerUsername) {
+      console.log('Polileo: Found username via method 1');
+      return headerUsername.textContent.trim();
+    }
+
+    // Method 2: Any .username element
+    const usernameEl = document.querySelector('.username');
+    if (usernameEl) {
+      console.log('Polileo: Found username via method 2');
+      return usernameEl.textContent.trim();
+    }
+
+    // Method 3: Look for "Hola, Username" pattern
+    const holaMatch = document.body.innerHTML.match(/Hola,\s*([^<]+)</i);
+    if (holaMatch) {
+      console.log('Polileo: Found username via method 3');
+      return holaMatch[1].trim();
+    }
+
+    console.log('Polileo: Could not find username');
+  } catch (e) {
+    console.log('Polileo: Error getting username', e);
+  }
+  return null;
+}
+
 // Show notification when pole detected
-function showPoleDetectedNotification() {
-  if (poleAlreadyDetected) return;
+function showPoleDetectedNotification(poleAuthor) {
+  console.log('Polileo: showPoleDetectedNotification called with author:', poleAuthor);
+
+  if (poleAlreadyDetected) {
+    console.log('Polileo: Already detected, skipping');
+    return;
+  }
   poleAlreadyDetected = true;
 
-  const existing = document.getElementById('polileo-reply-alert');
-  if (existing) existing.remove();
+  try {
+    const existing = document.getElementById('polileo-reply-alert');
+    if (existing) existing.remove();
 
-  // Block submit button
-  blockSubmitButton();
+    // Check if the current user got the pole
+    const currentUser = getCurrentUsername();
+    console.log('Polileo: Current user:', currentUser, 'Pole author:', poleAuthor);
 
-  const alert = document.createElement('div');
-  alert.id = 'polileo-reply-alert';
-  alert.innerHTML = `
-    <span>¡Pole detectada!</span>
-    <button id="polileo-alert-close">×</button>
-  `;
-  document.body.appendChild(alert);
+    // Normalize for comparison
+    const normalizedPoleAuthor = poleAuthor ? poleAuthor.toLowerCase().trim() : '';
+    const normalizedCurrentUser = currentUser ? currentUser.toLowerCase().trim() : '';
+    const isOwnPole = normalizedPoleAuthor && normalizedCurrentUser &&
+      normalizedPoleAuthor === normalizedCurrentUser;
+    console.log('Polileo: Normalized comparison:', normalizedPoleAuthor, '===', normalizedCurrentUser, '→', isOwnPole);
 
-  // Position alert vertically centered with button and to its left
-  const btnRect = btn.getBoundingClientRect();
-  const alertRect = alert.getBoundingClientRect();
-  const btnCenterY = btnRect.top + btnRect.height / 2;
-  const alertTop = btnCenterY - alertRect.height / 2;
-  alert.style.top = alertTop + 'px';
-  alert.style.left = 'auto';
-  alert.style.right = (window.innerWidth - btnRect.left + 10) + 'px';
+    // Only block submit if it's not our own pole
+    if (!isOwnPole) {
+      blockSubmitButton();
+    }
 
-  document.getElementById('polileo-alert-close').addEventListener('click', () => {
-    alert.remove();
-  });
+    const authorText = poleAuthor ? `Pole de ${poleAuthor}` : '¡Pole detectada!';
+
+    const alert = document.createElement('div');
+    alert.id = 'polileo-reply-alert';
+    alert.innerHTML = `<span>${authorText}</span>`;
+
+    if (isOwnPole) {
+      alert.classList.add('success');
+      console.log('Polileo: Creating SUCCESS toast (green, no refresh)');
+    } else {
+      // Add refresh button for other's poles
+      const refreshBtn = document.createElement('button');
+      refreshBtn.id = 'polileo-alert-refresh';
+      refreshBtn.title = 'Recargar página';
+      refreshBtn.textContent = '↻';
+      refreshBtn.addEventListener('click', () => window.location.reload());
+      alert.appendChild(refreshBtn);
+      console.log('Polileo: Creating FAIL toast (red, with refresh)');
+    }
+
+    document.body.appendChild(alert);
+    console.log('Polileo: Alert appended to body, className:', alert.className);
+
+    // Position alert vertically centered with button and to its left
+    try {
+      const btnRect = btn.getBoundingClientRect();
+      const btnCenterY = btnRect.top + btnRect.height / 2;
+      const alertHeight = alert.offsetHeight;
+      const alertTop = btnCenterY - alertHeight / 2;
+      alert.style.top = alertTop + 'px';
+      alert.style.left = 'auto';
+      alert.style.right = (window.innerWidth - btnRect.left + 10) + 'px';
+      console.log('Polileo: Alert positioned at top:', alertTop, 'right:', alert.style.right);
+    } catch (posError) {
+      console.log('Polileo: Error positioning alert, using defaults', posError);
+      alert.style.top = '100px';
+      alert.style.right = '70px';
+    }
+
+    console.log('Polileo: Alert created successfully, visible:', alert.offsetWidth > 0);
+  } catch (e) {
+    console.error('Polileo: Error showing notification', e);
+  }
 }
 
 // Listen for notifications from background
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === 'poleDetected' && !poleAlreadyDetected) {
-    showPoleDetectedNotification();
+    showPoleDetectedNotification(msg.poleAuthor);
   } else if (msg.action === 'windowStatusChanged') {
     updateButton(msg.isActive);
   }
@@ -200,12 +273,16 @@ function safeSendMessage(msg, callback) {
 
 // If we're on a thread auto-opened by polileo with only 1 post, monitor it
 const threadId = getThreadId();
+console.log('Polileo: Page loaded. Thread ID:', threadId, 'Auto-opened:', isAutoOpenedByPolileo());
+
 if (threadId && isAutoOpenedByPolileo()) {
   const initialPostCount = countPostsInDOM();
   console.log('Polileo: Auto-opened thread', threadId, 'with', initialPostCount, 'posts');
 
   // Only monitor if it's a valid pole (1 post = only OP)
   if (initialPostCount === 1) {
+    console.log('Polileo: Valid pole thread, starting monitoring...');
+
     // Load settings and inject anti-fail checkbox
     chrome.storage.local.get(['antifailDefault'], (result) => {
       const antifailEnabled = result.antifailDefault !== false;
@@ -216,6 +293,8 @@ if (threadId && isAutoOpenedByPolileo()) {
       action: 'watchThread',
       threadId: threadId,
       initialCount: initialPostCount
+    }, (response) => {
+      console.log('Polileo: watchThread response:', response);
     });
 
     // Stop watching when leaving the page
@@ -223,6 +302,6 @@ if (threadId && isAutoOpenedByPolileo()) {
       safeSendMessage({ action: 'unwatchThread', threadId: threadId });
     });
   } else {
-    console.log('Polileo: Thread already has pole, not monitoring');
+    console.log('Polileo: Thread already has', initialPostCount, 'posts, not monitoring');
   }
 }

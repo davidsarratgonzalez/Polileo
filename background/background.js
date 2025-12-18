@@ -267,6 +267,7 @@ async function checkWatchedThreads() {
       try {
         await chrome.tabs.get(info.tabId);
       } catch {
+        console.log('Polileo: Tab no longer exists for thread', threadId);
         watchedThreads.delete(threadId);
         continue;
       }
@@ -277,25 +278,34 @@ async function checkWatchedThreads() {
         { credentials: 'include', cache: 'no-store' }
       );
 
-      if (!resp.ok) continue;
+      if (!resp.ok) {
+        console.log('Polileo: Fetch failed for thread', threadId, 'status:', resp.status);
+        continue;
+      }
 
       const html = await resp.text();
       const currentCount = countPostsInHtml(html);
+      console.log('Polileo: Thread', threadId, 'has', currentCount, 'posts (initial:', info.initialCount, ')');
 
       // If more than 1 post, someone got the pole - notify and stop monitoring
       if (currentCount > 1) {
+        // Extract the username of who got the pole
+        const poleAuthor = extractPoleAuthor(html);
+        console.log('Polileo: Pole detected! Author:', poleAuthor);
+
         // Send notification to the tab
         chrome.tabs.sendMessage(info.tabId, {
           action: 'poleDetected',
-          currentCount: currentCount
+          currentCount: currentCount,
+          poleAuthor: poleAuthor
         });
 
         // Stop monitoring this thread
         watchedThreads.delete(threadId);
-        console.log('Polileo: Pole detected in thread', threadId, '- stopping monitor');
+        console.log('Polileo: Stopped monitoring thread', threadId);
       }
-    } catch {
-      // Network error or tab closed, continue
+    } catch (e) {
+      console.log('Polileo: Error checking thread', threadId, e);
     }
   }
 }
@@ -310,4 +320,42 @@ function countPostsInHtml(html) {
   if (postcountMatches) return postcountMatches.length;
 
   return 0;
+}
+
+function extractPoleAuthor(html) {
+  // Find the second post (the pole) and extract its author
+  // The second post is the pole (first reply after OP)
+
+  // Method 1: Split by post markers and get the second post's author
+  const postMatches = [...html.matchAll(/id="post_message_(\d+)"/g)];
+  if (postMatches.length >= 2) {
+    // Get the position of the second post
+    const secondPostStart = postMatches[1].index;
+    // Look backwards from that position for the username (in the post header)
+    const beforeSecondPost = html.substring(Math.max(0, secondPostStart - 3000), secondPostStart);
+
+    // Find the last member.php link before the post content (that's the author)
+    const memberLinks = [...beforeSecondPost.matchAll(/member\.php\?u=\d+[^>]*>([^<]+)</g)];
+    if (memberLinks.length > 0) {
+      return memberLinks[memberLinks.length - 1][1].trim();
+    }
+  }
+
+  // Method 2: Look for postcount2 marker and find nearby username
+  const postcount2Match = html.match(/id="postcount2"/);
+  if (postcount2Match) {
+    const beforePost = html.substring(Math.max(0, postcount2Match.index - 3000), postcount2Match.index);
+    const memberLinks = [...beforePost.matchAll(/member\.php\?u=\d+[^>]*>([^<]+)</g)];
+    if (memberLinks.length > 0) {
+      return memberLinks[memberLinks.length - 1][1].trim();
+    }
+  }
+
+  // Method 3: Find all bigusername occurrences and get the second one
+  const bigUserMatches = [...html.matchAll(/class="bigusername"[^>]*>\s*<[^>]+>([^<]+)</g)];
+  if (bigUserMatches.length >= 2) {
+    return bigUserMatches[1][1].trim();
+  }
+
+  return null;
 }
