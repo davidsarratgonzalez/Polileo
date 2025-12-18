@@ -1,0 +1,37 @@
+#polebot-btn {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 99999;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  font-size: 24px;
+  font-weight: bold;
+  color: white;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#polebot-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+
+#polebot-btn.active {
+  background: linear-gradient(135deg, #4CAF50, #8BC34A);
+  animation: pulse 1.5s infinite;
+}
+
+#polebot-btn.inactive {
+  background: #666;
+  animation: none;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
+  70% { box-shadow: 0 0 0 15px rgba(76, 175, 80, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+}

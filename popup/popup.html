@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Polebot</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Polebot</h1>
+
+    <div class="status-container">
+      <span class="status-label">Status:</span>
+      <span id="status" class="status inactive">Inactive</span>
+    </div>
+
+    <button id="toggleBtn" class="toggle-btn">
+      Activate
+    </button>
+
+    <button id="clearBtn" class="clear-btn">
+      Clear History
+    </button>
+
+    <p class="info">
+      When active, Polebot monitors Forocoches General for threads with 0 replies and opens them automatically.
+    </p>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
