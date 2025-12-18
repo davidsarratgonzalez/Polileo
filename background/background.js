@@ -165,8 +165,11 @@ async function poll() {
               const oldest = state.openedThreads.values().next().value;
               state.openedThreads.delete(oldest);
             }
+            // Check if we should lock focus for this window
+            const shouldLock = await shouldLockFocusForWindow(windowId);
             // Add polileo=1 param so content script knows this was auto-opened
-            chrome.tabs.create({ url: `${pole.url}&polileo=1`, active: true, windowId });
+            // If focus lock is ON, open in background (active: false)
+            chrome.tabs.create({ url: `${pole.url}&polileo=1`, active: !shouldLock, windowId });
           }
         }
       }
@@ -221,6 +224,25 @@ function saveStates() {
     };
   }
   chrome.storage.local.set({ windowStates: data });
+}
+
+// Check if focus should be locked for a specific window
+async function shouldLockFocusForWindow(windowId) {
+  try {
+    // Get the active tab in this window
+    const [activeTab] = await chrome.tabs.query({ active: true, windowId: windowId });
+
+    // If active tab is a polileo-opened thread, always lock
+    if (activeTab?.url?.includes('polileo=1')) {
+      return true;
+    }
+  } catch {
+    // Window might not exist
+  }
+
+  // Otherwise check manual preference (default: unlocked)
+  const { focusLockManual } = await chrome.storage.local.get(['focusLockManual']);
+  return focusLockManual || false;
 }
 
 async function updateBadge(windowId) {

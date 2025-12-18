@@ -5,6 +5,65 @@ btn.innerHTML = `<img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="Po
 btn.title = 'Polileo - Click to toggle';
 document.body.appendChild(btn);
 
+// Create lock button (focus lock)
+const lockBtn = document.createElement('button');
+lockBtn.id = 'polileo-lock-btn';
+document.body.appendChild(lockBtn);
+
+const lockIconSvg = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>`;
+const unlockIconSvg = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 17c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm6-9h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6h1.9c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm0 12H6V10h12v10z"/></svg>`;
+
+// Detect if this page was opened by Polileo
+const isPolileoPage = window.location.href.includes('polileo=1');
+
+// Local lock state for this page (for polileo pages that start locked)
+let localLockState = isPolileoPage;
+
+// Get initial lock state
+function loadLockState() {
+  if (isPolileoPage) {
+    // Polileo pages always start locked
+    updateLockButton(localLockState);
+  } else {
+    // Non-polileo pages use stored preference (default: unlocked)
+    chrome.storage.local.get(['focusLockManual'], (result) => {
+      updateLockButton(result.focusLockManual || false);
+    });
+  }
+}
+loadLockState();
+
+// Toggle lock on click
+lockBtn.addEventListener('click', () => {
+  if (isPolileoPage) {
+    // Polileo pages: toggle local state only (doesn't persist)
+    localLockState = !localLockState;
+    updateLockButton(localLockState);
+  } else {
+    // Non-polileo pages: toggle and save to storage
+    chrome.storage.local.get(['focusLockManual'], (result) => {
+      const newState = !(result.focusLockManual || false);
+      chrome.storage.local.set({ focusLockManual: newState });
+      updateLockButton(newState);
+    });
+  }
+});
+
+// Re-check when tab becomes visible (for non-polileo pages)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !isPolileoPage) {
+    loadLockState();
+  }
+});
+
+function updateLockButton(isLocked) {
+  lockBtn.innerHTML = isLocked ? lockIconSvg : unlockIconSvg;
+  lockBtn.title = isLocked
+    ? 'Focus bloqueado - nuevos hilos se abren en segundo plano'
+    : 'Focus libre - nuevos hilos robarán el foco';
+  lockBtn.className = isLocked ? 'locked' : 'unlocked';
+}
+
 // Position button below subheader (if exists) or header, aligned with avatar
 function updateButtonPosition() {
   const subheader = document.getElementById('subheader');
@@ -15,6 +74,8 @@ function updateButtonPosition() {
   if (referenceEl) {
     const bottom = referenceEl.getBoundingClientRect().bottom;
     btn.style.top = (bottom + 10) + 'px';
+    // Lock button below main button
+    lockBtn.style.top = (bottom + 10 + 50 + 5) + 'px'; // btn height + gap
   }
 
   // Align horizontally with avatar
@@ -23,6 +84,9 @@ function updateButtonPosition() {
     const avatarCenterX = avatarRect.left + avatarRect.width / 2;
     btn.style.left = (avatarCenterX - 25) + 'px'; // 25 = half button width
     btn.style.right = 'auto';
+    // Lock button centered under main button
+    lockBtn.style.left = (avatarCenterX - 15) + 'px'; // 15 = half lock button width
+    lockBtn.style.right = 'auto';
   }
 }
 updateButtonPosition();
@@ -395,6 +459,12 @@ function showPoleDetectedNotification(poleAuthor) {
     // Only block submit if it's not our own pole
     if (!isOwnPole) {
       blockSubmitButton();
+    }
+
+    // Auto-unlock focus lock on polileo pages (pole already taken, no need to stay locked)
+    if (isPolileoPage) {
+      localLockState = false;
+      updateLockButton(false);
     }
 
     const authorText = poleAuthor ? `Pole de ${poleAuthor}` : '¡Pole detectada!';

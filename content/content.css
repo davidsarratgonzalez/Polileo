@@ -42,6 +42,44 @@
   100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
 }
 
+/* Lock button */
+#polileo-lock-btn {
+  position: fixed;
+  right: 10px;
+  z-index: 99999;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+#polileo-lock-btn svg {
+  width: 100%;
+  height: 100%;
+}
+
+#polileo-lock-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+#polileo-lock-btn.unlocked {
+  background: #e0e0e0;
+  color: #888;
+}
+
+#polileo-lock-btn.locked {
+  background: #bdbdbd;
+  color: #555;
+}
+
 /* New replies notification - speech bubble */
 #polileo-reply-alert {
   position: fixed;
