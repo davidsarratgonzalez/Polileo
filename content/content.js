@@ -56,6 +56,113 @@ function updateButton(isActive) {
 }
 
 // ============================================
+// Cooldown system - track posts globally
+// ============================================
+
+const COOLDOWN_DURATION = 30000; // 30 seconds
+
+// Detect if we just posted successfully (URL has #post{ID})
+function detectSuccessfulPost() {
+  const hashMatch = window.location.hash.match(/#post(\d+)/);
+  if (!hashMatch) return;
+
+  const postId = hashMatch[1];
+  console.log('Polileo: Detected post hash #post' + postId);
+
+  chrome.storage.local.get(['processedPosts'], (result) => {
+    const processed = result.processedPosts || [];
+
+    // Check if we already processed this post
+    if (processed.includes(postId)) {
+      console.log('Polileo: Post already processed, skipping');
+      return;
+    }
+
+    // Record the timestamp NOW (this is when the post completed)
+    const postTime = Date.now();
+    console.log('Polileo: New post detected! Recording timestamp:', postTime);
+
+    // Add to processed list (keep last 20 to avoid infinite growth)
+    processed.push(postId);
+    while (processed.length > 20) processed.shift();
+
+    chrome.storage.local.set({
+      lastPostTime: postTime,
+      processedPosts: processed
+    });
+
+    // Start showing the cooldown bar
+    showCooldownBar();
+  });
+}
+
+// Create cooldown bar element
+function createCooldownBar() {
+  if (document.getElementById('polileo-cooldown')) {
+    return document.getElementById('polileo-cooldown');
+  }
+
+  const bar = document.createElement('div');
+  bar.id = 'polileo-cooldown';
+  bar.innerHTML = `
+    <div id="polileo-cooldown-progress"></div>
+    <span id="polileo-cooldown-text"></span>
+  `;
+  document.body.appendChild(bar);
+
+  // Position below the Polileo button
+  positionCooldownBar();
+  return bar;
+}
+
+function positionCooldownBar() {
+  const bar = document.getElementById('polileo-cooldown');
+  if (!bar) return;
+
+  const btnRect = btn.getBoundingClientRect();
+  bar.style.top = (btnRect.bottom + 10) + 'px';
+  bar.style.left = (btnRect.left + (btnRect.width - 50) / 2) + 'px';
+}
+
+// Show and update the cooldown bar
+function showCooldownBar() {
+  chrome.storage.local.get(['lastPostTime'], (result) => {
+    if (!result.lastPostTime) return;
+
+    const elapsed = Date.now() - result.lastPostTime;
+    const remaining = COOLDOWN_DURATION - elapsed;
+
+    if (remaining <= 0) {
+      // Cooldown finished
+      const bar = document.getElementById('polileo-cooldown');
+      if (bar) bar.remove();
+      return;
+    }
+
+    // Create bar if needed
+    createCooldownBar();
+    const progress = document.getElementById('polileo-cooldown-progress');
+    const text = document.getElementById('polileo-cooldown-text');
+
+    const percentage = (remaining / COOLDOWN_DURATION) * 100;
+    const secondsLeft = Math.ceil(remaining / 1000);
+
+    progress.style.width = percentage + '%';
+    text.textContent = secondsLeft + 's';
+
+    // Continue updating
+    requestAnimationFrame(() => setTimeout(showCooldownBar, 100));
+  });
+}
+
+// Initialize cooldown system on page load
+detectSuccessfulPost();
+showCooldownBar(); // Show existing cooldown if any
+
+// Update cooldown bar position on resize
+window.addEventListener('resize', positionCooldownBar);
+
+// ============================================
 // Thread monitoring - detect new replies
 // ============================================
 
