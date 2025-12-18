@@ -61,39 +61,36 @@ function updateButton(isActive) {
 
 const COOLDOWN_DURATION = 30000; // 30 seconds
 
-// Detect if we just posted successfully (URL has #post{ID})
+// Detect if we just posted successfully
+// Must come from newreply.php (referrer) AND have #post{ID} in URL
 function detectSuccessfulPost() {
+  // Check if we came from posting (referrer must be newreply.php)
+  const referrer = document.referrer || '';
+  const cameFromPosting = referrer.includes('newreply.php');
+
+  if (!cameFromPosting) {
+    console.log('Polileo: Referrer is not newreply.php, not a new post');
+    return;
+  }
+
+  // Verify URL has #post{ID}
   const hashMatch = window.location.hash.match(/#post(\d+)/);
-  if (!hashMatch) return;
+  if (!hashMatch) {
+    console.log('Polileo: No #post hash in URL');
+    return;
+  }
 
   const postId = hashMatch[1];
-  console.log('Polileo: Detected post hash #post' + postId);
+  console.log('Polileo: Came from newreply.php with #post' + postId + ' - this is a NEW post!');
 
-  chrome.storage.local.get(['processedPosts'], (result) => {
-    const processed = result.processedPosts || [];
+  // Record the timestamp NOW (this is when the post completed)
+  const postTime = Date.now();
+  console.log('Polileo: Recording post timestamp:', postTime);
 
-    // Check if we already processed this post
-    if (processed.includes(postId)) {
-      console.log('Polileo: Post already processed, skipping');
-      return;
-    }
+  chrome.storage.local.set({ lastPostTime: postTime });
 
-    // Record the timestamp NOW (this is when the post completed)
-    const postTime = Date.now();
-    console.log('Polileo: New post detected! Recording timestamp:', postTime);
-
-    // Add to processed list (keep last 20 to avoid infinite growth)
-    processed.push(postId);
-    while (processed.length > 20) processed.shift();
-
-    chrome.storage.local.set({
-      lastPostTime: postTime,
-      processedPosts: processed
-    });
-
-    // Start showing the cooldown bar
-    showCooldownBar();
-  });
+  // Start showing the cooldown bar
+  showCooldownBar();
 }
 
 // Create cooldown bar element
