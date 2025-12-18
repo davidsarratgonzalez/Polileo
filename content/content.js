@@ -61,37 +61,88 @@ function updateButton(isActive) {
 
 const COOLDOWN_DURATION = 30000; // 30 seconds
 
-// Detect if we just posted successfully
-// Must come from newreply.php (referrer) AND have #post{ID} in URL
-function detectSuccessfulPost() {
-  // Check if we came from posting (referrer must be newreply.php)
-  const referrer = document.referrer || '';
-  const cameFromPosting = referrer.includes('newreply.php');
+// Detect successful posts by watching for new posts in the DOM
+function setupPostDetector() {
+  // Only on thread pages
+  if (!getThreadId()) return;
 
-  if (!cameFromPosting) {
-    console.log('Polileo: Referrer is not newreply.php, not a new post');
-    return;
-  }
+  // Count initial posts
+  let lastPostCount = countPostsInDOM();
+  const currentUser = getCurrentUsername();
 
-  // Verify URL has #post{ID}
-  const hashMatch = window.location.hash.match(/#post(\d+)/);
-  if (!hashMatch) {
-    console.log('Polileo: No #post hash in URL');
-    return;
-  }
+  console.log('Polileo: Post detector initialized. Initial posts:', lastPostCount, 'User:', currentUser);
 
-  const postId = hashMatch[1];
-  console.log('Polileo: Came from newreply.php with #post' + postId + ' - this is a NEW post!');
+  // Watch for new posts being added
+  const observer = new MutationObserver((mutations) => {
+    const newPostCount = countPostsInDOM();
 
-  // Record the timestamp NOW (this is when the post completed)
-  const postTime = Date.now();
-  console.log('Polileo: Recording post timestamp:', postTime);
+    if (newPostCount > lastPostCount) {
+      console.log('Polileo: New post detected!', lastPostCount, '->', newPostCount);
 
-  chrome.storage.local.set({ lastPostTime: postTime });
+      // Check if the newest post is from the current user
+      const posts = document.querySelectorAll('[id^="post_message_"]');
+      if (posts.length > 0) {
+        const newestPost = posts[posts.length - 1];
+        const postId = newestPost.id.replace('post_message_', '');
 
-  // Start showing the cooldown bar
-  showCooldownBar();
+        // Find the author of this post - try multiple methods
+        let postAuthor = null;
+
+        // Method 1: Find the post container by ID (without underscore)
+        const postContainer = document.getElementById(`post${postId}`) ||
+                              document.getElementById(`post_${postId}`);
+        if (postContainer) {
+          const authorLink = postContainer.querySelector('a.bigusername, a[href*="member.php"]');
+          postAuthor = authorLink?.textContent?.trim();
+        }
+
+        // Method 2: Search backwards in DOM from post_message element
+        if (!postAuthor) {
+          let parent = newestPost.parentElement;
+          for (let i = 0; i < 10 && parent; i++) {
+            const authorLink = parent.querySelector('a.bigusername, a[href*="member.php"]');
+            if (authorLink) {
+              postAuthor = authorLink.textContent?.trim();
+              break;
+            }
+            parent = parent.parentElement;
+          }
+        }
+
+        // Method 3: For quick reply posts, the author is always the current user
+        if (!postAuthor && newestPost.closest('#posts')) {
+          // If we just added a post and can't find author, assume it's ours
+          postAuthor = currentUser;
+          console.log('Polileo: Could not find author, assuming current user');
+        }
+
+        console.log('Polileo: Newest post author:', postAuthor, 'Current user:', currentUser, 'Post ID:', postId);
+
+        // If it's our post, start cooldown
+        if (postAuthor && currentUser &&
+            postAuthor.toLowerCase() === currentUser.toLowerCase()) {
+          console.log('Polileo: This is OUR post! Starting cooldown');
+          chrome.storage.local.set({ lastPostTime: Date.now() });
+          showCooldownBar();
+        }
+      }
+
+      lastPostCount = newPostCount;
+    }
+  });
+
+  // Observe the posts container
+  const postsContainer = document.getElementById('posts') || document.body;
+  observer.observe(postsContainer, {
+    childList: true,
+    subtree: true
+  });
+
+  console.log('Polileo: DOM observer active');
 }
+
+// Initialize post detector
+setupPostDetector();
 
 // Create cooldown bar element
 function createCooldownBar() {
@@ -152,12 +203,39 @@ function showCooldownBar() {
   });
 }
 
-// Initialize cooldown system on page load
-detectSuccessfulPost();
-showCooldownBar(); // Show existing cooldown if any
-
 // Update cooldown bar position on resize
 window.addEventListener('resize', positionCooldownBar);
+
+// Initialize cooldown tracking (always active)
+showCooldownBar(); // Show existing cooldown if any
+
+// Anti-fail features on threads with no pole yet (always active)
+const threadId = getThreadId();
+if (threadId) {
+  const initialPostCount = countPostsInDOM();
+  console.log('Polileo: Thread', threadId, 'has', initialPostCount, 'posts');
+
+  if (initialPostCount === 1) {
+    console.log('Polileo: No pole yet! Enabling anti-fail features...');
+
+    chrome.storage.local.get(['antifailDefault'], (result) => {
+      const antifailEnabled = result.antifailDefault !== false;
+      injectAntiFailCheckbox(antifailEnabled);
+    });
+
+    safeSendMessage({
+      action: 'watchThread',
+      threadId: threadId,
+      initialCount: initialPostCount
+    }, (response) => {
+      console.log('Polileo: watchThread response:', response);
+    });
+
+    window.addEventListener('beforeunload', () => {
+      safeSendMessage({ action: 'unwatchThread', threadId: threadId });
+    });
+  }
+}
 
 // ============================================
 // Thread monitoring - detect new replies
@@ -375,37 +453,3 @@ function safeSendMessage(msg, callback) {
   }
 }
 
-// If we're on ANY thread with only 1 post (no pole yet), enable anti-fail features
-const threadId = getThreadId();
-
-if (threadId) {
-  const initialPostCount = countPostsInDOM();
-  console.log('Polileo: Thread', threadId, 'has', initialPostCount, 'posts');
-
-  // Only enable anti-fail if it's a valid pole opportunity (1 post = only OP)
-  if (initialPostCount === 1) {
-    console.log('Polileo: No pole yet! Enabling anti-fail features...');
-
-    // Load settings and inject anti-fail checkbox
-    chrome.storage.local.get(['antifailDefault'], (result) => {
-      const antifailEnabled = result.antifailDefault !== false;
-      injectAntiFailCheckbox(antifailEnabled);
-    });
-
-    // Start monitoring for new replies
-    safeSendMessage({
-      action: 'watchThread',
-      threadId: threadId,
-      initialCount: initialPostCount
-    }, (response) => {
-      console.log('Polileo: watchThread response:', response);
-    });
-
-    // Stop watching when leaving the page
-    window.addEventListener('beforeunload', () => {
-      safeSendMessage({ action: 'unwatchThread', threadId: threadId });
-    });
-  } else {
-    console.log('Polileo: Thread already has pole, anti-fail not needed');
-  }
-}
