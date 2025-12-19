@@ -926,6 +926,91 @@ document.addEventListener('visibilitychange', () => {
 const threadId = getThreadId();
 console.log('Polileo: URL:', window.location.href, '-> threadId:', threadId);
 
+// Self-checking interval for this thread (content script doesn't sleep like service worker)
+let selfCheckInterval = null;
+let selfCheckRunning = false;
+
+// Start self-checking for pole detection (independent of background script)
+function startSelfChecking() {
+  if (selfCheckInterval || selfCheckRunning) return;
+
+  // Get check interval from settings
+  chrome.storage.local.get(['timings'], (result) => {
+    if (chrome.runtime.lastError) return;
+    const checkInterval = result.timings?.threadCheck || 500;
+
+    console.log('Polileo: Starting self-check every', checkInterval, 'ms');
+    selfCheckRunning = true;
+
+    selfCheckInterval = setInterval(() => {
+      if (!isExtensionContextValid()) {
+        stopSelfChecking();
+        return;
+      }
+      if (poleAlreadyDetected) {
+        stopSelfChecking();
+        return;
+      }
+      selfCheckForPole();
+    }, checkInterval);
+  });
+}
+
+function stopSelfChecking() {
+  if (selfCheckInterval) {
+    clearInterval(selfCheckInterval);
+    selfCheckInterval = null;
+  }
+  selfCheckRunning = false;
+}
+
+// Fetch thread and check for pole
+async function selfCheckForPole() {
+  if (poleAlreadyDetected) return;
+
+  try {
+    const resp = await fetch(
+      `${window.location.origin}/foro/showthread.php?t=${threadId}&_=${Date.now()}`,
+      { credentials: 'include', cache: 'no-store' }
+    );
+
+    if (!resp.ok) return;
+
+    const html = await resp.text();
+
+    // Count posts in the fetched HTML
+    const postMatches = html.match(/id="post_message_\d+"/g);
+    const postCount = postMatches ? postMatches.length : 0;
+
+    if (postCount > 1 && !poleAlreadyDetected) {
+      console.log('Polileo: [SELF-CHECK] *** POLE DETECTED *** Posts:', postCount);
+
+      // Extract pole author
+      const poleAuthor = extractPoleAuthorFromHtml(html);
+
+      // Show notification
+      showPoleDetectedNotification(poleAuthor);
+      stopSelfChecking();
+    }
+  } catch (e) {
+    // Network error, will retry next interval
+  }
+}
+
+// Extract pole author from HTML
+function extractPoleAuthorFromHtml(html) {
+  const postMatches = [...html.matchAll(/id="post_message_(\d+)"/g)];
+  if (postMatches.length >= 2) {
+    const secondPostStart = postMatches[1].index;
+    const beforeSecondPost = html.substring(Math.max(0, secondPostStart - 3000), secondPostStart);
+    const memberLinks = [...beforeSecondPost.matchAll(/member\.php\?u=\d+[^>]*>([^<]+)</g)];
+    if (memberLinks.length > 0) {
+      return memberLinks[memberLinks.length - 1][1].trim();
+    }
+  }
+  return null;
+}
+
 if (threadId) {
   // Small delay to ensure DOM is fully ready
   setTimeout(() => {
@@ -933,7 +1018,10 @@ if (threadId) {
     console.log('Polileo: Thread', threadId, 'has', postCount, 'posts');
 
     if (postCount === 1) {
-      console.log('Polileo: *** NO POLE YET! *** Registering for watching...');
+      console.log('Polileo: *** NO POLE YET! *** Starting self-check and registering...');
+
+      // START SELF-CHECKING (independent of background)
+      startSelfChecking();
 
       try {
         chrome.storage.local.get(['antifailDefault'], (result) => {
@@ -946,21 +1034,20 @@ if (threadId) {
         injectAntiFailCheckbox(true);
       }
 
-      // Register thread for watching
+      // Also register with background (as backup)
       safeSendMessage({
         action: 'watchThread',
         threadId: threadId,
         initialCount: postCount
       }, (response) => {
         if (response?.success) {
-          isRegistered = true;  // Mark as registered for guardrail checks
-          console.log('Polileo: ✓ Thread', threadId, 'registered for watching');
-        } else {
-          console.log('Polileo: ✗ Failed to register thread', threadId, response);
+          isRegistered = true;
+          console.log('Polileo: ✓ Thread', threadId, 'registered with background');
         }
       });
 
       window.addEventListener('beforeunload', () => {
+        stopSelfChecking();
         safeSendMessage({ action: 'unwatchThread', threadId: threadId });
       });
     } else if (postCount > 1) {
@@ -968,7 +1055,7 @@ if (threadId) {
     } else {
       console.log('Polileo: Could not count posts in thread');
     }
-  }, 50);  // Small delay for DOM stability
+  }, 50);
 }
 
 // ============================================
@@ -1261,9 +1348,19 @@ function checkAndRegisterThread() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     const tid = getThreadId();
-    if (tid && !poleAlreadyDetected && !isRegistered) {
-      console.log('Polileo: [GUARDRAIL] Tab became visible - checking registration');
-      setTimeout(checkAndRegisterThread, 100);
+    if (tid && !poleAlreadyDetected) {
+      // Restart self-checking if not running
+      if (!selfCheckRunning && countPostsInDOM() === 1) {
+        console.log('Polileo: [GUARDRAIL] Tab visible - restarting self-check');
+        startSelfChecking();
+      }
+      // Also do immediate check
+      selfCheckForPole();
+
+      if (!isRegistered) {
+        console.log('Polileo: [GUARDRAIL] Tab became visible - checking registration');
+        checkAndRegisterThread();
+      }
     }
   }
 });
