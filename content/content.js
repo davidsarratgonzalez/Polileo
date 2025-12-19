@@ -430,16 +430,19 @@ function setupPostDetector() {
 
         console.log('Polileo: Newest post author:', postAuthor, 'Current user:', currentUser, 'Post ID:', postId);
 
-        // If it's our post, start cooldown
+        // If it's our post, start cooldown and check if we got pole
         if (postAuthor && currentUser &&
             postAuthor.toLowerCase() === currentUser.toLowerCase()) {
-          console.log('Polileo: This is OUR post! Starting cooldown');
+          console.log('Polileo: This is OUR post! Starting cooldown and checking position...');
           try {
             chrome.storage.local.set({ lastPostTime: Date.now() });
           } catch {
             // Extension context invalidated
           }
           showCooldownBar();
+
+          // Check if this post is the pole or not - immediately
+          checkPostPositionAndOfferDelete(postId);
         }
       }
 
@@ -466,11 +469,10 @@ function setupSubmitDetector() {
   if (!submitBtn) return;
 
   submitBtn.addEventListener('click', () => {
-    console.log('Polileo: Submit button clicked, will check for cooldown in 2s');
-    // Wait a bit for the post to be submitted, then start cooldown
+    console.log('Polileo: Submit button clicked, will check in 2s');
+    // Wait a bit for the post to be submitted
     setTimeout(() => {
       if (!isExtensionContextValid()) return;
-      // Check if a new post was added (the MutationObserver should have caught it, but just in case)
       try {
         chrome.storage.local.get(['lastPostTime'], (result) => {
           if (chrome.runtime.lastError) return;
@@ -480,6 +482,15 @@ function setupSubmitDetector() {
             console.log('Polileo: Submit click backup - starting cooldown');
             chrome.storage.local.set({ lastPostTime: Date.now() });
             showCooldownBar();
+
+            // Find the newest post (likely ours) and check position
+            const posts = document.querySelectorAll('[id^="post_message_"]');
+            if (posts.length > 0) {
+              const newestPost = posts[posts.length - 1];
+              const postId = newestPost.id.replace('post_message_', '');
+              console.log('Polileo: Submit backup - checking position for post', postId);
+              checkPostPositionAndOfferDelete(postId);
+            }
           }
         });
       } catch {
@@ -559,9 +570,13 @@ function showCooldownBar() {
 const MAX_CACHED_POST_IDS = 100;
 
 if (window.location.href.includes('posted=1')) {
-  // Extract post ID from URL to avoid duplicate cooldowns on refresh
+  console.log('Polileo: ========== POSTED=1 DETECTED ==========');
+  console.log('Polileo: Full URL:', window.location.href);
+
+  // Extract post ID from URL
   const postIdMatch = window.location.href.match(/[?&]p=(\d+)/);
   const postId = postIdMatch ? postIdMatch[1] : null;
+  console.log('Polileo: Extracted postId:', postId);
 
   if (postId) {
     try {
@@ -572,7 +587,7 @@ if (window.location.href.includes('posted=1')) {
 
         // Only trigger cooldown if this post ID is not in cache
         if (!postedIds.includes(postId)) {
-          console.log('Polileo: Detected posted=1 with new postId:', postId, '- starting cooldown');
+          console.log('Polileo: New post detected! Starting cooldown...');
 
           // Add to cache, keep max size
           postedIds.push(postId);
@@ -585,12 +600,249 @@ if (window.location.href.includes('posted=1')) {
             postedIds: postedIds
           });
           showCooldownBar();
+
+          // Check our post's position immediately
+          console.log('Polileo: Checking post position...');
+          checkPostPositionAndOfferDelete(postId);
         } else {
-          console.log('Polileo: posted=1 but postId already cached:', postId, '- skipping');
+          console.log('Polileo: PostId already in cache, skipping');
         }
       });
-    } catch {
-      // Extension context invalidated
+    } catch (e) {
+      console.log('Polileo: Error in posted=1 handler:', e);
+    }
+  }
+}
+
+// Check post position and offer delete if not pole
+function checkPostPositionAndOfferDelete(postId) {
+  console.log('Polileo: === Checking position for post', postId, '===');
+
+  // Find all postcount elements to understand the structure
+  const allPostcounts = document.querySelectorAll('a[id^="postcount"]');
+  console.log('Polileo: Found', allPostcounts.length, 'postcount elements');
+
+  // Log first few for debugging
+  allPostcounts.forEach((pc, i) => {
+    if (i < 5) {
+      console.log('Polileo:   postcount', i, ':', pc.id, pc.textContent.trim());
+    }
+  });
+
+  // Find our post
+  const ourPost = document.getElementById(`post_message_${postId}`);
+  console.log('Polileo: Found our post element:', !!ourPost);
+
+  if (!ourPost) {
+    console.log('Polileo: Could not find post_message_' + postId + ' in DOM');
+    // Try alternate: look in the hash
+    console.log('Polileo: Hash is:', window.location.hash);
+    return;
+  }
+
+  // Method 1: Find post container and its postcount
+  let ourPosition = 0;
+  let container = ourPost;
+
+  // Go up until we find an element with id starting with "post" (but not post_message)
+  for (let i = 0; i < 20 && container; i++) {
+    container = container.parentElement;
+    if (!container) break;
+
+    // Check if this container has a postcount inside
+    const postcountInContainer = container.querySelector('a[id^="postcount"]');
+    if (postcountInContainer) {
+      const match = postcountInContainer.id.match(/postcount(\d+)/);
+      if (match) {
+        ourPosition = parseInt(match[1]);
+        console.log('Polileo: Found postcount', ourPosition, 'in container at level', i);
+        break;
+      }
+    }
+
+    // Also check if we reached a post wrapper
+    if (container.id && container.id.match(/^post\d+$/) && !container.id.startsWith('post_message')) {
+      console.log('Polileo: Reached post wrapper:', container.id);
+    }
+  }
+
+  // Method 2: If not found, use all postcount elements and match by proximity
+  if (!ourPosition) {
+    console.log('Polileo: Method 1 failed, trying proximity match...');
+
+    // Get our post's position in the viewport
+    const ourRect = ourPost.getBoundingClientRect();
+
+    let closestPostcount = null;
+    let closestDistance = Infinity;
+
+    allPostcounts.forEach(pc => {
+      const pcRect = pc.getBoundingClientRect();
+      // Calculate vertical distance
+      const distance = Math.abs(pcRect.top - ourRect.top);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestPostcount = pc;
+      }
+    });
+
+    if (closestPostcount && closestDistance < 500) {
+      const match = closestPostcount.id.match(/postcount(\d+)/);
+      if (match) {
+        ourPosition = parseInt(match[1]);
+        console.log('Polileo: Found closest postcount', ourPosition, 'at distance', closestDistance);
+      }
+    }
+  }
+
+  // Method 3: Count all post_message elements and calculate position
+  if (!ourPosition) {
+    console.log('Polileo: Method 2 failed, counting posts...');
+    const allPostMessages = document.querySelectorAll('[id^="post_message_"]');
+    console.log('Polileo: Total post_message elements:', allPostMessages.length);
+
+    for (let i = 0; i < allPostMessages.length; i++) {
+      if (allPostMessages[i].id === `post_message_${postId}`) {
+        // Calculate position based on page
+        const pageMatch = window.location.href.match(/[?&]page=(\d+)/);
+        const currentPage = pageMatch ? parseInt(pageMatch[1]) : 1;
+        const postsPerPage = allPostMessages.length; // Use actual count
+        ourPosition = (currentPage - 1) * 10 + i + 1; // Assume 10 per page for older pages
+        console.log('Polileo: Calculated position:', ourPosition, '(page', currentPage, ', index', i, ')');
+        break;
+      }
+    }
+  }
+
+  console.log('Polileo: === FINAL POSITION:', ourPosition, '===');
+
+  // Decide what to do
+  if (ourPosition > 2) {
+    console.log('Polileo: NOT POLE! Showing delete toast...');
+    showDeleteToast(postId);
+  } else if (ourPosition === 2) {
+    console.log('Polileo: POLE! Congratulations!');
+  } else if (ourPosition === 1) {
+    console.log('Polileo: This is the OP');
+  } else {
+    console.log('Polileo: Could not determine position - showing delete option anyway');
+    // Show delete option anyway since we can't be sure
+    showDeleteToast(postId);
+  }
+}
+
+// Track current deletable post for hotkey
+let currentDeletablePostId = null;
+
+// Show delete toast for failed pole attempts
+function showDeleteToast(postId) {
+  console.log('Polileo: showDeleteToast called for post', postId);
+
+  // Remove existing delete toast if any
+  const existing = document.getElementById('polileo-delete-toast');
+  if (existing) existing.remove();
+
+  // Store for hotkey access
+  currentDeletablePostId = postId;
+
+  const deleteHotkeyHint = isMac ? '⌘⌫' : 'Alt+⌫';
+
+  const toast = document.createElement('div');
+  toast.id = 'polileo-delete-toast';
+  toast.innerHTML = `
+    <span>No conseguiste la pole</span>
+    <button id="polileo-delete-btn">Borrar mensaje <kbd>${deleteHotkeyHint}</kbd></button>
+  `;
+  document.body.appendChild(toast);
+
+  console.log('Polileo: Delete toast appended to body');
+
+  // Handle delete button click
+  document.getElementById('polileo-delete-btn').addEventListener('click', () => {
+    deletePost(postId);
+  });
+}
+
+// Hotkey for delete: Cmd+Backspace (Mac) or Alt+Backspace (others)
+document.addEventListener('keydown', (e) => {
+  if (!currentDeletablePostId) return;
+
+  const isDeleteHotkey = (isMac && e.metaKey && e.key === 'Backspace') ||
+                         (!isMac && e.altKey && e.key === 'Backspace');
+
+  if (isDeleteHotkey) {
+    e.preventDefault();
+    const deleteBtn = document.getElementById('polileo-delete-btn');
+    if (deleteBtn && !deleteBtn.disabled) {
+      deletePost(currentDeletablePostId);
+    }
+  }
+});
+
+// Delete a post automatically
+async function deletePost(postId) {
+  const deleteBtn = document.getElementById('polileo-delete-btn');
+  if (deleteBtn) {
+    deleteBtn.textContent = 'Borrando...';
+    deleteBtn.disabled = true;
+  }
+
+  try {
+    // Step 1: Fetch the edit page to get the form data
+    const editUrl = `https://forocoches.com/foro/editpost.php?do=editpost&p=${postId}`;
+    const editResp = await fetch(editUrl, { credentials: 'include' });
+    const editHtml = await editResp.text();
+
+    // Extract security token and other form fields
+    const securityTokenMatch = editHtml.match(/name="securitytoken"\s+value="([^"]+)"/);
+    const postHashMatch = editHtml.match(/name="posthash"\s+value="([^"]+)"/);
+
+    if (!securityTokenMatch) {
+      throw new Error('Could not find security token');
+    }
+
+    const securityToken = securityTokenMatch[1];
+    const postHash = postHashMatch ? postHashMatch[1] : '';
+
+    // Step 2: Submit delete request
+    const deleteUrl = 'https://forocoches.com/foro/editpost.php?do=deletepost';
+    const formData = new URLSearchParams();
+    formData.append('securitytoken', securityToken);
+    formData.append('do', 'deletepost');
+    formData.append('p', postId);
+    formData.append('deletepost', 'delete');
+    formData.append('reason', '');
+    formData.append('posthash', postHash);
+
+    const deleteResp = await fetch(deleteUrl, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: formData.toString()
+    });
+
+    if (deleteResp.ok) {
+      console.log('Polileo: Post deleted successfully');
+      currentDeletablePostId = null;
+      const toast = document.getElementById('polileo-delete-toast');
+      if (toast) {
+        toast.innerHTML = '<span>✓ Mensaje borrado</span>';
+        toast.classList.add('success');
+        setTimeout(() => {
+          toast.classList.add('fade-out');
+          setTimeout(() => toast.remove(), 500);
+        }, 2000);
+      }
+    } else {
+      throw new Error('Delete request failed');
+    }
+  } catch (e) {
+    console.error('Polileo: Error deleting post', e);
+    const toast = document.getElementById('polileo-delete-toast');
+    if (toast) {
+      toast.innerHTML = `<span>Error al borrar</span><a href="https://forocoches.com/foro/editpost.php?do=editpost&p=${postId}" target="_blank">Borrar manual</a>`;
     }
   }
 }
