@@ -844,7 +844,13 @@ async function deletePost(postId) {
 
     // Step 1: Fetch the edit page to get the form data
     const editUrl = `${baseUrl}/editpost.php?do=editpost&p=${postId}`;
+    console.log('Polileo: Fetching edit page:', editUrl);
     const editResp = await fetch(editUrl, { credentials: 'include' });
+
+    if (!editResp.ok) {
+      throw new Error(`Edit page fetch failed: ${editResp.status}`);
+    }
+
     const editHtml = await editResp.text();
 
     // Extract security token and other form fields
@@ -852,7 +858,7 @@ async function deletePost(postId) {
     const postHashMatch = editHtml.match(/name="posthash"\s+value="([^"]+)"/);
 
     if (!securityTokenMatch) {
-      throw new Error('Could not find security token');
+      throw new Error('Could not find security token - may not have permission to edit');
     }
 
     const securityToken = securityTokenMatch[1];
@@ -868,6 +874,7 @@ async function deletePost(postId) {
     formData.append('reason', '');
     formData.append('posthash', postHash);
 
+    console.log('Polileo: Submitting delete request...');
     const deleteResp = await fetch(deleteUrl, {
       method: 'POST',
       credentials: 'include',
@@ -877,38 +884,81 @@ async function deletePost(postId) {
       body: formData.toString()
     });
 
-    // Check response - forum might redirect or return various status codes
-    const deleteHtml = await deleteResp.text();
+    console.log('Polileo: Delete response status:', deleteResp.status);
 
-    // Success indicators: redirect to thread, or no error message, or contains confirmation
-    const isSuccess = deleteResp.ok ||
-                      deleteResp.status === 302 ||
-                      deleteHtml.includes('redirect') ||
-                      deleteHtml.includes('showthread') ||
-                      !deleteHtml.includes('error') ||
-                      deleteHtml.length < 1000; // Empty/small response usually means success
+    // Step 3: VERIFY deletion by re-fetching the thread and checking if post is gone
+    console.log('Polileo: Verifying deletion...');
+    await new Promise(resolve => setTimeout(resolve, 500)); // Small delay for server to process
 
-    console.log('Polileo: Delete response status:', deleteResp.status, 'success:', isSuccess);
+    const verifySuccess = await verifyPostDeleted(postId);
 
-    // Assume success if we got this far without error
-    console.log('Polileo: Post deleted successfully');
-    currentDeletablePostId = null;
-    const toast = document.getElementById('polileo-delete-toast');
-    if (toast) {
-      toast.innerHTML = '<span>✓ Mensaje borrado</span>';
-      toast.classList.add('success');
-      setTimeout(() => {
-        toast.classList.add('fade-out');
-        setTimeout(() => toast.remove(), 500);
-      }, 2000);
+    if (verifySuccess) {
+      console.log('Polileo: ✓ Post deletion VERIFIED - post no longer exists');
+      currentDeletablePostId = null;
+      const toast = document.getElementById('polileo-delete-toast');
+      if (toast) {
+        toast.innerHTML = '<span>✓ Mensaje borrado</span>';
+        toast.classList.add('success');
+        setTimeout(() => {
+          toast.classList.add('fade-out');
+          setTimeout(() => toast.remove(), 500);
+        }, 2000);
+      }
+    } else {
+      console.log('Polileo: ✗ Post deletion could not be verified - post may still exist');
+      // Show uncertain state but don't error - sometimes verification fails but delete worked
+      const toast = document.getElementById('polileo-delete-toast');
+      if (toast) {
+        toast.innerHTML = '<span>Borrado enviado - verifica manualmente</span>';
+        toast.classList.add('success');
+        setTimeout(() => {
+          toast.classList.add('fade-out');
+          setTimeout(() => toast.remove(), 3000);
+        }, 3000);
+      }
+      currentDeletablePostId = null;
     }
   } catch (e) {
-    console.error('Polileo: Error deleting post', e);
+    console.error('Polileo: Error deleting post:', e.message);
     const toast = document.getElementById('polileo-delete-toast');
     if (toast) {
       const manualUrl = `${window.location.origin}/foro/editpost.php?do=editpost&p=${postId}`;
-      toast.innerHTML = `<span>Error al borrar</span><a href="${manualUrl}" target="_blank">Borrar manual</a>`;
+      toast.innerHTML = `<span>Error: ${e.message}</span><a href="${manualUrl}" target="_blank">Borrar manual</a>`;
     }
+  }
+}
+
+// Verify that a post has been deleted by checking if it still exists
+async function verifyPostDeleted(postId) {
+  try {
+    const threadId = getThreadId();
+    if (!threadId) {
+      console.log('Polileo: Cannot verify - no thread ID');
+      return false;
+    }
+
+    // Fetch the thread fresh
+    const resp = await fetch(
+      `${window.location.origin}/foro/showthread.php?t=${threadId}&_=${Date.now()}`,
+      { credentials: 'include', cache: 'no-store' }
+    );
+
+    if (!resp.ok) {
+      console.log('Polileo: Verification fetch failed:', resp.status);
+      return false;
+    }
+
+    const html = await resp.text();
+
+    // Check if our post ID still exists in the page
+    const postStillExists = html.includes(`id="post_message_${postId}"`);
+
+    console.log('Polileo: Post', postId, 'still exists:', postStillExists);
+
+    return !postStillExists; // Success if post is gone
+  } catch (e) {
+    console.log('Polileo: Verification error:', e.message);
+    return false;
   }
 }
 
@@ -964,19 +1014,28 @@ function stopSelfChecking() {
   selfCheckRunning = false;
 }
 
-// Fetch thread and check for pole
+// Fetch thread and check for pole - with timeout and parallel requests
+const POLE_CHECK_TIMEOUT = 1500; // 1.5 second timeout per request
+let checkInFlight = false;
+
 async function selfCheckForPole() {
   if (poleAlreadyDetected) return;
+  if (checkInFlight) {
+    console.log('Polileo: [SELF-CHECK] Previous check still in flight, firing parallel request anyway');
+  }
+
+  checkInFlight = true;
 
   try {
-    const resp = await fetch(
-      `${window.location.origin}/foro/showthread.php?t=${threadId}&_=${Date.now()}`,
-      { credentials: 'include', cache: 'no-store' }
-    );
+    // Race multiple requests - use the first one that responds
+    const result = await raceRequests(threadId, 2); // Send 2 parallel requests
 
-    if (!resp.ok) return;
+    if (!result || poleAlreadyDetected) {
+      checkInFlight = false;
+      return;
+    }
 
-    const html = await resp.text();
+    const { html } = result;
 
     // Count posts in the fetched HTML
     const postMatches = html.match(/id="post_message_\d+"/g);
@@ -994,6 +1053,72 @@ async function selfCheckForPole() {
     }
   } catch (e) {
     // Network error, will retry next interval
+  } finally {
+    checkInFlight = false;
+  }
+}
+
+// Race multiple fetch requests - returns first successful response
+async function raceRequests(tid, count = 2) {
+  const controllers = [];
+  const promises = [];
+
+  for (let i = 0; i < count; i++) {
+    const controller = new AbortController();
+    controllers.push(controller);
+
+    // Add small stagger to avoid exact simultaneous requests
+    const delay = i * 50;
+
+    const promise = new Promise(async (resolve, reject) => {
+      await new Promise(r => setTimeout(r, delay));
+
+      // Set timeout to abort slow requests
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        reject(new Error('Timeout'));
+      }, POLE_CHECK_TIMEOUT);
+
+      try {
+        const resp = await fetch(
+          `${window.location.origin}/foro/showthread.php?t=${tid}&_=${Date.now()}&r=${i}`,
+          {
+            credentials: 'include',
+            cache: 'no-store',
+            signal: controller.signal
+          }
+        );
+
+        clearTimeout(timeoutId);
+
+        if (!resp.ok) {
+          reject(new Error(`HTTP ${resp.status}`));
+          return;
+        }
+
+        const html = await resp.text();
+        resolve({ html, requestIndex: i });
+      } catch (e) {
+        clearTimeout(timeoutId);
+        reject(e);
+      }
+    });
+
+    promises.push(promise);
+  }
+
+  try {
+    // Promise.any returns the first fulfilled promise
+    const result = await Promise.any(promises);
+
+    // Abort remaining requests
+    controllers.forEach(c => c.abort());
+
+    return result;
+  } catch (e) {
+    // All requests failed
+    console.log('Polileo: [SELF-CHECK] All requests failed');
+    return null;
   }
 }
 
@@ -1051,7 +1176,11 @@ if (threadId) {
         safeSendMessage({ action: 'unwatchThread', threadId: threadId });
       });
     } else if (postCount > 1) {
-      console.log('Polileo: Thread already has pole (', postCount, 'posts)');
+      // IMPORTANT: Mark pole as detected so we don't try to check later
+      console.log('Polileo: Thread already has pole (', postCount, 'posts) - marking detected');
+      poleAlreadyDetected = true;
+      // Notify background to not watch this thread
+      safeSendMessage({ action: 'polileoPageHasPole', hasPole: true });
     } else {
       console.log('Polileo: Could not count posts in thread');
     }
@@ -1349,8 +1478,21 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     const tid = getThreadId();
     if (tid && !poleAlreadyDetected) {
-      // Restart self-checking if not running
-      if (!selfCheckRunning && countPostsInDOM() === 1) {
+      // FIRST: Check current DOM state - if there are already replies, DON'T start checking
+      const currentPostCount = countPostsInDOM();
+      console.log('Polileo: [VISIBILITY] Tab visible - DOM has', currentPostCount, 'posts');
+
+      if (currentPostCount > 1) {
+        // There's already a pole in the DOM! Mark as detected and don't check
+        console.log('Polileo: [VISIBILITY] DOM already has pole - stopping all checks');
+        poleAlreadyDetected = true;
+        stopSelfChecking();
+        safeSendMessage({ action: 'unwatchThread', threadId: tid });
+        return;
+      }
+
+      // Only 1 post (OP) - safe to check
+      if (!selfCheckRunning) {
         console.log('Polileo: [GUARDRAIL] Tab visible - restarting self-check');
         startSelfChecking();
       }

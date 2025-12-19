@@ -15,7 +15,11 @@ let THREAD_CHECK_INTERVAL = DEFAULT_TIMINGS.threadCheck;
 
 // Load timing settings from storage
 chrome.storage.local.get(['timings'], (result) => {
-  if (result.timings) {
+  if (chrome.runtime.lastError) {
+    console.log('Polileo BG: Error loading timings:', chrome.runtime.lastError);
+    return;
+  }
+  if (result && result.timings) {
     POLL_INTERVAL = result.timings.pollInterval || DEFAULT_TIMINGS.pollInterval;
     THREAD_CHECK_INTERVAL = result.timings.threadCheck || result.timings.threadWatchFast || DEFAULT_TIMINGS.threadCheck;
     console.log('Polileo BG: Loaded timings - poll:', POLL_INTERVAL, 'threadCheck:', THREAD_CHECK_INTERVAL);
@@ -51,7 +55,11 @@ const tabsWithPole = new Set();
 
 // Load watched threads from storage on startup (in case service worker restarted)
 chrome.storage.local.get(['watchedThreadsData'], (result) => {
-  if (result.watchedThreadsData) {
+  if (chrome.runtime.lastError) {
+    console.log('Polileo BG: Error loading watchedThreadsData:', chrome.runtime.lastError);
+    return;
+  }
+  if (result && result.watchedThreadsData) {
     for (const [threadId, info] of Object.entries(result.watchedThreadsData)) {
       watchedThreads.set(threadId, info);
     }
@@ -73,7 +81,12 @@ function saveWatchedThreads() {
 
 // Load saved state on startup
 chrome.storage.local.get(['windowStates'], (result) => {
-  if (result.windowStates) {
+  if (chrome.runtime.lastError) {
+    console.log('Polileo BG: Error loading windowStates:', chrome.runtime.lastError);
+    updatePolling();
+    return;
+  }
+  if (result && result.windowStates) {
     for (const [windowId, state] of Object.entries(result.windowStates)) {
       windowStates.set(parseInt(windowId), {
         isActive: state.isActive || false,
@@ -560,25 +573,33 @@ function stopThreadWatching() {
   chrome.alarms.clear(THREAD_WATCH_ALARM);
 }
 
-// Check ALL watched threads
+// Check ALL watched threads - IN PARALLEL for speed
 async function checkAllThreads() {
   if (watchedThreads.size === 0) return;
 
   const threadsToRemove = [];
+  const checkPromises = [];
 
   for (const [threadId, info] of watchedThreads) {
-    // Check if tab still exists
-    try {
-      await chrome.tabs.get(info.tabId);
-    } catch {
-      console.log('Polileo BG: Tab closed for thread', threadId);
-      threadsToRemove.push(threadId);
-      continue;
-    }
+    // Check if tab still exists (quick sync check via catch)
+    const checkPromise = (async () => {
+      try {
+        await chrome.tabs.get(info.tabId);
+      } catch {
+        console.log('Polileo BG: Tab closed for thread', threadId);
+        threadsToRemove.push(threadId);
+        return;
+      }
 
-    // Check this thread
-    await checkSingleThread(threadId, info);
+      // Check this thread - fire and don't wait
+      await checkSingleThread(threadId, info);
+    })();
+
+    checkPromises.push(checkPromise);
   }
+
+  // Wait for ALL checks to complete in parallel
+  await Promise.allSettled(checkPromises);
 
   // Cleanup closed tabs
   for (const threadId of threadsToRemove) {
@@ -639,15 +660,25 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
   }
 });
 
-// Check a single thread for pole
+// Check a single thread for pole - with timeout
+const THREAD_CHECK_TIMEOUT = 2000; // 2 second timeout
+
 async function checkSingleThread(threadId, info) {
   const checkStart = Date.now();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), THREAD_CHECK_TIMEOUT);
 
   try {
     const resp = await fetch(
       `https://www.forocoches.com/foro/showthread.php?t=${threadId}&_=${Date.now()}`,
-      { credentials: 'include', cache: 'no-store' }
+      {
+        credentials: 'include',
+        cache: 'no-store',
+        signal: controller.signal
+      }
     );
+
+    clearTimeout(timeoutId);
 
     if (!resp.ok) {
       console.log('Polileo: ✗ Fetch failed for thread', threadId, '- status:', resp.status);
@@ -679,7 +710,12 @@ async function checkSingleThread(threadId, info) {
       console.log('Polileo: ✓ Thread', threadId, '- still', currentCount, 'post (', elapsed, 'ms)');
     }
   } catch (e) {
-    console.log('Polileo: ✗ Error checking thread', threadId, '-', e.message);
+    clearTimeout(timeoutId);
+    if (e.name === 'AbortError') {
+      console.log('Polileo: ✗ Timeout checking thread', threadId, '(>', THREAD_CHECK_TIMEOUT, 'ms)');
+    } else {
+      console.log('Polileo: ✗ Error checking thread', threadId, '-', e.message);
+    }
   }
 }
 
