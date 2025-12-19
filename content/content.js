@@ -839,8 +839,11 @@ async function deletePost(postId) {
   }
 
   try {
+    // Use same origin as current page to avoid CORS issues
+    const baseUrl = window.location.origin + '/foro';
+
     // Step 1: Fetch the edit page to get the form data
-    const editUrl = `https://forocoches.com/foro/editpost.php?do=editpost&p=${postId}`;
+    const editUrl = `${baseUrl}/editpost.php?do=editpost&p=${postId}`;
     const editResp = await fetch(editUrl, { credentials: 'include' });
     const editHtml = await editResp.text();
 
@@ -856,7 +859,7 @@ async function deletePost(postId) {
     const postHash = postHashMatch ? postHashMatch[1] : '';
 
     // Step 2: Submit delete request
-    const deleteUrl = 'https://forocoches.com/foro/editpost.php?do=deletepost';
+    const deleteUrl = `${baseUrl}/editpost.php?do=deletepost`;
     const formData = new URLSearchParams();
     formData.append('securitytoken', securityToken);
     formData.append('do', 'deletepost');
@@ -903,7 +906,8 @@ async function deletePost(postId) {
     console.error('Polileo: Error deleting post', e);
     const toast = document.getElementById('polileo-delete-toast');
     if (toast) {
-      toast.innerHTML = `<span>Error al borrar</span><a href="https://forocoches.com/foro/editpost.php?do=editpost&p=${postId}" target="_blank">Borrar manual</a>`;
+      const manualUrl = `${window.location.origin}/foro/editpost.php?do=editpost&p=${postId}`;
+      toast.innerHTML = `<span>Error al borrar</span><a href="${manualUrl}" target="_blank">Borrar manual</a>`;
     }
   }
 }
