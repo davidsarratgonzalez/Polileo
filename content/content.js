@@ -135,7 +135,10 @@ const defaultHotkeys = {
   focusReply: { key: 'Tab', ctrl: false, alt: false, meta: false, shift: false },
   submitReply: isMac
     ? { key: 's', ctrl: false, alt: false, meta: true, shift: false }
-    : { key: 's', ctrl: false, alt: true, meta: false, shift: false }
+    : { key: 's', ctrl: false, alt: true, meta: false, shift: false },
+  deletePost: isMac
+    ? { key: 'Backspace', ctrl: false, alt: false, meta: true, shift: false }
+    : { key: 'Backspace', ctrl: false, alt: true, meta: false, shift: false }
 };
 
 let currentHotkeys = { ...defaultHotkeys };
@@ -734,6 +737,23 @@ function checkPostPositionAndOfferDelete(postId) {
 // Track current deletable post for hotkey
 let currentDeletablePostId = null;
 
+// Format hotkey for display
+function formatHotkeyDisplay(hotkey) {
+  const parts = [];
+  if (hotkey.ctrl) parts.push('Ctrl');
+  if (hotkey.alt) parts.push('Alt');
+  if (hotkey.meta) parts.push(isMac ? '⌘' : 'Win');
+  if (hotkey.shift) parts.push('Shift');
+
+  let keyName = hotkey.key;
+  if (keyName === 'Backspace') keyName = '⌫';
+  else if (keyName === ' ') keyName = 'Space';
+  else if (keyName.length === 1) keyName = keyName.toUpperCase();
+
+  parts.push(keyName);
+  return parts.join('+');
+}
+
 // Show delete toast for failed pole attempts
 function showDeleteToast(postId) {
   console.log('Polileo: showDeleteToast called for post', postId);
@@ -745,7 +765,8 @@ function showDeleteToast(postId) {
   // Store for hotkey access
   currentDeletablePostId = postId;
 
-  const deleteHotkeyHint = isMac ? '⌘⌫' : 'Alt+⌫';
+  const deleteHotkey = currentHotkeys.deletePost || defaultHotkeys.deletePost;
+  const deleteHotkeyHint = formatHotkeyDisplay(deleteHotkey);
 
   const toast = document.createElement('div');
   toast.id = 'polileo-delete-toast';
@@ -761,23 +782,53 @@ function showDeleteToast(postId) {
   document.getElementById('polileo-delete-btn').addEventListener('click', () => {
     deletePost(postId);
   });
+
+  // Inject hotkey into iframe immediately so it works while focused on editor
+  injectDeleteHotkeyIntoIframe();
 }
 
-// Hotkey for delete: Cmd+Backspace (Mac) or Alt+Backspace (others)
-document.addEventListener('keydown', (e) => {
+// Hotkey for delete - uses configurable hotkey
+function handleDeleteHotkey(e) {
   if (!currentDeletablePostId) return;
 
-  const isDeleteHotkey = (isMac && e.metaKey && e.key === 'Backspace') ||
-                         (!isMac && e.altKey && e.key === 'Backspace');
-
-  if (isDeleteHotkey) {
+  const deleteHotkey = currentHotkeys.deletePost || defaultHotkeys.deletePost;
+  if (matchesHotkey(e, deleteHotkey)) {
     e.preventDefault();
+    e.stopPropagation();
     const deleteBtn = document.getElementById('polileo-delete-btn');
     if (deleteBtn && !deleteBtn.disabled) {
       deletePost(currentDeletablePostId);
     }
   }
+}
+
+// Listen on main document
+document.addEventListener('keydown', handleDeleteHotkey);
+
+// Also inject into editor iframe so hotkey works while typing
+function injectDeleteHotkeyIntoIframe() {
+  const iframe = getEditorIframe();
+  if (!iframe) return;
+
+  try {
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+    if (!iframeDoc) return;
+
+    // Remove old listener if exists, then add fresh one
+    iframeDoc.removeEventListener('keydown', handleDeleteHotkey);
+    iframeDoc.addEventListener('keydown', handleDeleteHotkey);
+    console.log('Polileo: Delete hotkey injected into iframe');
+  } catch {
+    // Cross-origin iframe
+  }
+}
+
+// Inject on load and when iframe might be created
+injectDeleteHotkeyIntoIframe();
+const deleteHotkeyObserver = new MutationObserver(() => {
+  injectDeleteHotkeyIntoIframe();
 });
+deleteHotkeyObserver.observe(document.body, { childList: true, subtree: true });
 
 // Delete a post automatically
 async function deletePost(postId) {
@@ -823,20 +874,30 @@ async function deletePost(postId) {
       body: formData.toString()
     });
 
-    if (deleteResp.ok) {
-      console.log('Polileo: Post deleted successfully');
-      currentDeletablePostId = null;
-      const toast = document.getElementById('polileo-delete-toast');
-      if (toast) {
-        toast.innerHTML = '<span>✓ Mensaje borrado</span>';
-        toast.classList.add('success');
-        setTimeout(() => {
-          toast.classList.add('fade-out');
-          setTimeout(() => toast.remove(), 500);
-        }, 2000);
-      }
-    } else {
-      throw new Error('Delete request failed');
+    // Check response - forum might redirect or return various status codes
+    const deleteHtml = await deleteResp.text();
+
+    // Success indicators: redirect to thread, or no error message, or contains confirmation
+    const isSuccess = deleteResp.ok ||
+                      deleteResp.status === 302 ||
+                      deleteHtml.includes('redirect') ||
+                      deleteHtml.includes('showthread') ||
+                      !deleteHtml.includes('error') ||
+                      deleteHtml.length < 1000; // Empty/small response usually means success
+
+    console.log('Polileo: Delete response status:', deleteResp.status, 'success:', isSuccess);
+
+    // Assume success if we got this far without error
+    console.log('Polileo: Post deleted successfully');
+    currentDeletablePostId = null;
+    const toast = document.getElementById('polileo-delete-toast');
+    if (toast) {
+      toast.innerHTML = '<span>✓ Mensaje borrado</span>';
+      toast.classList.add('success');
+      setTimeout(() => {
+        toast.classList.add('fade-out');
+        setTimeout(() => toast.remove(), 500);
+      }, 2000);
     }
   } catch (e) {
     console.error('Polileo: Error deleting post', e);

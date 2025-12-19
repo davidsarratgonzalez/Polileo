@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const hotkeyLockEl = document.getElementById('hotkeyLock');
   const hotkeyFocusEl = document.getElementById('hotkeyFocus');
   const hotkeySubmitEl = document.getElementById('hotkeySubmit');
+  const hotkeyDeleteEl = document.getElementById('hotkeyDelete');
 
   // Advanced config elements
   const advancedToggle = document.getElementById('advancedToggle');
@@ -23,7 +24,10 @@ document.addEventListener('DOMContentLoaded', () => {
     focusReply: { key: 'Tab', ctrl: false, alt: false, meta: false, shift: false },
     submitReply: isMac
       ? { key: 's', ctrl: false, alt: false, meta: true, shift: false }
-      : { key: 's', ctrl: false, alt: true, meta: false, shift: false }
+      : { key: 's', ctrl: false, alt: true, meta: false, shift: false },
+    deletePost: isMac
+      ? { key: 'Backspace', ctrl: false, alt: false, meta: true, shift: false }
+      : { key: 'Backspace', ctrl: false, alt: true, meta: false, shift: false }
   };
 
   // Default timing values
@@ -50,6 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateHotkeyDisplay(hotkeyLockEl, hotkeys.toggleLock || defaultHotkeys.toggleLock);
     updateHotkeyDisplay(hotkeyFocusEl, hotkeys.focusReply || defaultHotkeys.focusReply);
     updateHotkeyDisplay(hotkeySubmitEl, hotkeys.submitReply || defaultHotkeys.submitReply);
+    updateHotkeyDisplay(hotkeyDeleteEl, hotkeys.deletePost || defaultHotkeys.deletePost);
 
     // Load timing settings
     const timings = result.timings || defaultTimings;
@@ -110,6 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
   hotkeyLockEl.addEventListener('click', () => startRecording(hotkeyLockEl));
   hotkeyFocusEl.addEventListener('click', () => startRecording(hotkeyFocusEl));
   hotkeySubmitEl.addEventListener('click', () => startRecording(hotkeySubmitEl));
+  hotkeyDeleteEl.addEventListener('click', () => startRecording(hotkeyDeleteEl));
 
   function startRecording(element) {
     if (recordingElement) {
