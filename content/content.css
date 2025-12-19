@@ -73,8 +73,8 @@
 }
 
 #polileo-lock-btn.unlocked {
-  background: #e0e0e0;
-  color: #999;
+  background: #9e9e9e;
+  color: #fff;
 }
 
 #polileo-lock-btn.locked {

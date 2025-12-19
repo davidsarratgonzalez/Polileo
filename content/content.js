@@ -556,12 +556,42 @@ function showCooldownBar() {
 
 
 // Detect successful post via URL (posted=1 parameter)
+const MAX_CACHED_POST_IDS = 100;
+
 if (window.location.href.includes('posted=1')) {
-  console.log('Polileo: Detected posted=1 in URL - starting cooldown');
-  try {
-    chrome.storage.local.set({ lastPostTime: Date.now() });
-  } catch {
-    // Extension context invalidated
+  // Extract post ID from URL to avoid duplicate cooldowns on refresh
+  const postIdMatch = window.location.href.match(/[?&]p=(\d+)/);
+  const postId = postIdMatch ? postIdMatch[1] : null;
+
+  if (postId) {
+    try {
+      chrome.storage.local.get(['postedIds'], (result) => {
+        if (chrome.runtime.lastError) return;
+
+        const postedIds = result.postedIds || [];
+
+        // Only trigger cooldown if this post ID is not in cache
+        if (!postedIds.includes(postId)) {
+          console.log('Polileo: Detected posted=1 with new postId:', postId, '- starting cooldown');
+
+          // Add to cache, keep max size
+          postedIds.push(postId);
+          while (postedIds.length > MAX_CACHED_POST_IDS) {
+            postedIds.shift();
+          }
+
+          chrome.storage.local.set({
+            lastPostTime: Date.now(),
+            postedIds: postedIds
+          });
+          showCooldownBar();
+        } else {
+          console.log('Polileo: posted=1 but postId already cached:', postId, '- skipping');
+        }
+      });
+    } catch {
+      // Extension context invalidated
+    }
   }
 }
 
