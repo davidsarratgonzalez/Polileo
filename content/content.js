@@ -830,72 +830,173 @@ const deleteHotkeyObserver = new MutationObserver(() => {
 });
 deleteHotkeyObserver.observe(document.body, { childList: true, subtree: true });
 
-// Delete a post automatically
+// Delete a post automatically - ROBUST VERSION
 async function deletePost(postId) {
   const deleteBtn = document.getElementById('polileo-delete-btn');
-  if (deleteBtn) {
-    deleteBtn.textContent = 'Borrando...';
-    deleteBtn.disabled = true;
-  }
+  const toast = document.getElementById('polileo-delete-toast');
+
+  const updateStatus = (text) => {
+    if (deleteBtn) {
+      deleteBtn.textContent = text;
+      deleteBtn.disabled = true;
+    }
+  };
+
+  updateStatus('Borrando...');
 
   try {
-    // Use same origin as current page to avoid CORS issues
     const baseUrl = window.location.origin + '/foro';
 
-    // Step 1: Fetch the edit page to get the form data
-    const editUrl = `${baseUrl}/editpost.php?do=editpost&p=${postId}`;
-    console.log('Polileo: Fetching edit page:', editUrl);
-    const editResp = await fetch(editUrl, { credentials: 'include' });
+    // ============================================
+    // STEP 1: Get the delete confirmation page
+    // vBulletin requires visiting the delete page first
+    // ============================================
+    const deletePageUrl = `${baseUrl}/editpost.php?do=editpost&p=${postId}`;
+    console.log('Polileo: [DELETE] Step 1 - Fetching edit page:', deletePageUrl);
 
+    const editResp = await fetch(deletePageUrl, { credentials: 'include' });
     if (!editResp.ok) {
-      throw new Error(`Edit page fetch failed: ${editResp.status}`);
+      throw new Error(`No se pudo acceder al post (${editResp.status})`);
     }
 
     const editHtml = await editResp.text();
 
-    // Extract security token and other form fields
+    // Check if we have delete permission (look for delete button/option)
+    const hasDeleteOption = editHtml.includes('do=deletepost') ||
+                            editHtml.includes('deletepost') ||
+                            editHtml.includes('Borrar') ||
+                            editHtml.includes('Delete');
+
+    if (!hasDeleteOption) {
+      console.log('Polileo: [DELETE] No delete option found in edit page');
+      // Log a snippet for debugging
+      console.log('Polileo: [DELETE] Edit page snippet:', editHtml.substring(0, 1000));
+    }
+
+    // Extract ALL form fields - vBulletin needs specific fields
     const securityTokenMatch = editHtml.match(/name="securitytoken"\s+value="([^"]+)"/);
     const postHashMatch = editHtml.match(/name="posthash"\s+value="([^"]+)"/);
+    const poststarttime = editHtml.match(/name="poststarttime"\s+value="([^"]+)"/);
+    const loggedinuser = editHtml.match(/name="loggedinuser"\s+value="([^"]+)"/);
 
     if (!securityTokenMatch) {
-      throw new Error('Could not find security token - may not have permission to edit');
+      throw new Error('Sin permisos para borrar (no security token)');
     }
 
     const securityToken = securityTokenMatch[1];
-    const postHash = postHashMatch ? postHashMatch[1] : '';
+    console.log('Polileo: [DELETE] Got security token:', securityToken.substring(0, 20) + '...');
 
-    // Step 2: Submit delete request
-    const deleteUrl = `${baseUrl}/editpost.php?do=deletepost`;
+    // ============================================
+    // STEP 2: Submit the delete request
+    // ============================================
+    updateStatus('Enviando...');
+
+    const deleteUrl = `${baseUrl}/editpost.php`;
     const formData = new URLSearchParams();
-    formData.append('securitytoken', securityToken);
-    formData.append('do', 'deletepost');
-    formData.append('p', postId);
-    formData.append('deletepost', 'delete');
-    formData.append('reason', '');
-    formData.append('posthash', postHash);
 
-    console.log('Polileo: Submitting delete request...');
+    // Required fields
+    formData.append('do', 'deletepost');
+    formData.append('s', ''); // Session (usually empty)
+    formData.append('securitytoken', securityToken);
+    formData.append('p', postId);
+    formData.append('deletepost', 'delete'); // The delete action
+
+    // Optional fields that might help
+    if (postHashMatch) formData.append('posthash', postHashMatch[1]);
+    if (poststarttime) formData.append('poststarttime', poststarttime[1]);
+    if (loggedinuser) formData.append('loggedinuser', loggedinuser[1]);
+    formData.append('reason', ''); // Delete reason (optional)
+
+    console.log('Polileo: [DELETE] Step 2 - Submitting delete to:', deleteUrl);
+    console.log('Polileo: [DELETE] Form data:', formData.toString());
+
     const deleteResp = await fetch(deleteUrl, {
       method: 'POST',
       credentials: 'include',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Origin': window.location.origin,
+        'Referer': deletePageUrl
       },
       body: formData.toString()
     });
 
-    console.log('Polileo: Delete response status:', deleteResp.status);
+    console.log('Polileo: [DELETE] Response status:', deleteResp.status);
+    const deleteRespHtml = await deleteResp.text();
 
-    // Step 3: VERIFY deletion by re-fetching the thread and checking if post is gone
-    console.log('Polileo: Verifying deletion...');
-    await new Promise(resolve => setTimeout(resolve, 500)); // Small delay for server to process
+    // ============================================
+    // STEP 3: Analyze the delete response
+    // ============================================
+    console.log('Polileo: [DELETE] Step 3 - Analyzing response...');
 
-    const verifySuccess = await verifyPostDeleted(postId);
+    // Check for success indicators in response
+    const successIndicators = [
+      'redirect',
+      'window.location',
+      'showthread.php',
+      'El mensaje ha sido borrado',
+      'Message deleted',
+      'has been deleted',
+      'borrado correctamente'
+    ];
 
-    if (verifySuccess) {
-      console.log('Polileo: ✓ Post deletion VERIFIED - post no longer exists');
-      currentDeletablePostId = null;
-      const toast = document.getElementById('polileo-delete-toast');
+    const errorIndicators = [
+      'error',
+      'Error',
+      'no tiene permiso',
+      'permission',
+      'not allowed',
+      'invalid',
+      'Invalid'
+    ];
+
+    const responseHasSuccess = successIndicators.some(ind =>
+      deleteRespHtml.toLowerCase().includes(ind.toLowerCase())
+    );
+    const responseHasError = errorIndicators.some(ind =>
+      deleteRespHtml.includes(ind) && !deleteRespHtml.includes('errorless')
+    );
+
+    console.log('Polileo: [DELETE] Response analysis - success indicators:', responseHasSuccess, 'error indicators:', responseHasError);
+    console.log('Polileo: [DELETE] Response length:', deleteRespHtml.length);
+
+    // If response has clear error, fail immediately
+    if (responseHasError && !responseHasSuccess) {
+      // Extract error message if possible
+      const errorMatch = deleteRespHtml.match(/<div[^>]*class="[^"]*error[^"]*"[^>]*>([^<]+)</i);
+      const errorMsg = errorMatch ? errorMatch[1].trim() : 'Error del servidor';
+      throw new Error(errorMsg);
+    }
+
+    // ============================================
+    // STEP 4: VERIFY deletion with multiple attempts
+    // ============================================
+    updateStatus('Verificando...');
+    console.log('Polileo: [DELETE] Step 4 - Verifying deletion...');
+
+    // Try verification multiple times with increasing delays
+    const verifyDelays = [500, 1000, 1500]; // ms
+    let verified = false;
+
+    for (let i = 0; i < verifyDelays.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, verifyDelays[i]));
+
+      console.log('Polileo: [DELETE] Verification attempt', i + 1);
+      verified = await verifyPostDeleted(postId);
+
+      if (verified) {
+        console.log('Polileo: [DELETE] ✓ VERIFIED on attempt', i + 1);
+        break;
+      }
+    }
+
+    // ============================================
+    // STEP 5: Show result
+    // ============================================
+    currentDeletablePostId = null;
+
+    if (verified) {
+      console.log('Polileo: [DELETE] ✓✓✓ POST DELETED SUCCESSFULLY ✓✓✓');
       if (toast) {
         toast.innerHTML = '<span>✓ Mensaje borrado</span>';
         toast.classList.add('success');
@@ -904,60 +1005,155 @@ async function deletePost(postId) {
           setTimeout(() => toast.remove(), 500);
         }, 2000);
       }
-    } else {
-      console.log('Polileo: ✗ Post deletion could not be verified - post may still exist');
-      // Show uncertain state but don't error - sometimes verification fails but delete worked
-      const toast = document.getElementById('polileo-delete-toast');
+    } else if (responseHasSuccess || deleteResp.ok) {
+      // Response looked OK but verification failed - might be cache issue
+      console.log('Polileo: [DELETE] Response OK but verification failed - probably deleted');
       if (toast) {
-        toast.innerHTML = '<span>Borrado enviado - verifica manualmente</span>';
+        toast.innerHTML = '<span>✓ Probablemente borrado - refresca para confirmar</span>';
         toast.classList.add('success');
         setTimeout(() => {
           toast.classList.add('fade-out');
           setTimeout(() => toast.remove(), 3000);
         }, 3000);
       }
-      currentDeletablePostId = null;
+    } else {
+      // Uncertain - show manual link
+      console.log('Polileo: [DELETE] Uncertain result');
+      if (toast) {
+        const manualUrl = `${baseUrl}/editpost.php?do=editpost&p=${postId}`;
+        toast.innerHTML = `<span>No se pudo verificar</span><a href="${manualUrl}" target="_blank">Comprobar</a>`;
+      }
     }
+
   } catch (e) {
-    console.error('Polileo: Error deleting post:', e.message);
-    const toast = document.getElementById('polileo-delete-toast');
+    console.error('Polileo: [DELETE] Error:', e.message);
     if (toast) {
       const manualUrl = `${window.location.origin}/foro/editpost.php?do=editpost&p=${postId}`;
-      toast.innerHTML = `<span>Error: ${e.message}</span><a href="${manualUrl}" target="_blank">Borrar manual</a>`;
+      toast.innerHTML = `<span>${e.message}</span><a href="${manualUrl}" target="_blank">Borrar manual</a>`;
     }
   }
 }
 
 // Verify that a post has been deleted by checking if it still exists
+// IMPORTANT: We check the POST DIRECTLY, not the thread (which might be paginated)
 async function verifyPostDeleted(postId) {
   try {
-    const threadId = getThreadId();
-    if (!threadId) {
-      console.log('Polileo: Cannot verify - no thread ID');
+    const baseUrl = window.location.origin + '/foro';
+
+    // ============================================
+    // METHOD 1: Try to access the post directly via showthread.php?p=POSTID
+    // This URL shows the specific post regardless of pagination
+    // ============================================
+    const postUrl = `${baseUrl}/showthread.php?p=${postId}&_=${Date.now()}`;
+    console.log('Polileo: [VERIFY] Method 1 - Fetching post directly:', postUrl);
+
+    const postResp = await fetch(postUrl, {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      }
+    });
+
+    // If we get a redirect to an error page or 404, post is deleted
+    if (!postResp.ok) {
+      console.log('Polileo: [VERIFY] Post URL returned', postResp.status, '- likely deleted');
+      return true;
+    }
+
+    const postHtml = await postResp.text();
+
+    // Check if the specific post content exists
+    const postMessageExists = postHtml.includes(`id="post_message_${postId}"`);
+    const postContainerExists = postHtml.includes(`id="post${postId}"`);
+
+    console.log('Polileo: [VERIFY] Method 1 - post_message:', postMessageExists, 'post container:', postContainerExists);
+
+    // If the post exists in the response, it's NOT deleted
+    if (postMessageExists || postContainerExists) {
+      console.log('Polileo: [VERIFY] ✗ Post STILL EXISTS (found in direct URL)');
       return false;
     }
 
-    // Fetch the thread fresh
-    const resp = await fetch(
-      `${window.location.origin}/foro/showthread.php?t=${threadId}&_=${Date.now()}`,
-      { credentials: 'include', cache: 'no-store' }
-    );
+    // ============================================
+    // METHOD 2: Try to access the edit page
+    // If we can't edit, the post is likely deleted
+    // ============================================
+    const editUrl = `${baseUrl}/editpost.php?do=editpost&p=${postId}&_=${Date.now()}`;
+    console.log('Polileo: [VERIFY] Method 2 - Checking edit page:', editUrl);
 
-    if (!resp.ok) {
-      console.log('Polileo: Verification fetch failed:', resp.status);
+    const editResp = await fetch(editUrl, {
+      credentials: 'include',
+      cache: 'no-store'
+    });
+
+    if (!editResp.ok) {
+      console.log('Polileo: [VERIFY] Edit page returned', editResp.status, '- post deleted');
+      return true;
+    }
+
+    const editHtml = await editResp.text();
+
+    // Check for error indicators that mean post doesn't exist
+    const postNotFound = editHtml.includes('Invalid Post') ||
+                         editHtml.includes('mensaje no válido') ||
+                         editHtml.includes('no existe') ||
+                         editHtml.includes('not found') ||
+                         editHtml.includes('ha sido borrado') ||
+                         editHtml.includes('has been deleted');
+
+    // Check if edit form exists (meaning post is still there)
+    const editFormExists = editHtml.includes('name="message"') ||
+                           editHtml.includes('vB_Editor') ||
+                           editHtml.includes('do=updatepost');
+
+    console.log('Polileo: [VERIFY] Method 2 - notFound:', postNotFound, 'editForm:', editFormExists);
+
+    if (postNotFound) {
+      console.log('Polileo: [VERIFY] ✓ Post confirmed DELETED (edit page says not found)');
+      return true;
+    }
+
+    if (editFormExists) {
+      console.log('Polileo: [VERIFY] ✗ Post STILL EXISTS (edit form available)');
       return false;
     }
 
-    const html = await resp.text();
+    // ============================================
+    // METHOD 3: Check the thread's last page to be absolutely sure
+    // ============================================
+    const tid = getThreadId();
+    if (tid) {
+      // Fetch with goto=lastpost to get the last page
+      const lastPageUrl = `${baseUrl}/showthread.php?t=${tid}&goto=lastpost&_=${Date.now()}`;
+      console.log('Polileo: [VERIFY] Method 3 - Checking last page:', lastPageUrl);
 
-    // Check if our post ID still exists in the page
-    const postStillExists = html.includes(`id="post_message_${postId}"`);
+      const lastPageResp = await fetch(lastPageUrl, {
+        credentials: 'include',
+        cache: 'no-store'
+      });
 
-    console.log('Polileo: Post', postId, 'still exists:', postStillExists);
+      if (lastPageResp.ok) {
+        const lastPageHtml = await lastPageResp.text();
+        const existsOnLastPage = lastPageHtml.includes(`id="post_message_${postId}"`);
 
-    return !postStillExists; // Success if post is gone
+        console.log('Polileo: [VERIFY] Method 3 - exists on last page:', existsOnLastPage);
+
+        if (existsOnLastPage) {
+          console.log('Polileo: [VERIFY] ✗ Post STILL EXISTS (found on last page)');
+          return false;
+        }
+      }
+    }
+
+    // If we got here, we couldn't find the post anywhere
+    console.log('Polileo: [VERIFY] ✓ Post appears to be DELETED (not found anywhere)');
+    return true;
+
   } catch (e) {
-    console.log('Polileo: Verification error:', e.message);
+    console.log('Polileo: [VERIFY] Error:', e.message);
+    // On error, assume NOT deleted (safer)
     return false;
   }
 }
