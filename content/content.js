@@ -540,11 +540,10 @@ function showCooldownBar() {
       const remaining = COOLDOWN_DURATION - elapsed;
 
       if (remaining <= 0) {
-        // Cooldown finished - fade out then remove
+        // Cooldown finished - remove immediately
         const bar = document.getElementById('polileo-cooldown');
-        if (bar && !bar.classList.contains('fade-out')) {
-          bar.classList.add('fade-out');
-          setTimeout(() => bar.remove(), 500);
+        if (bar) {
+          bar.remove();
         }
         return;
       }
