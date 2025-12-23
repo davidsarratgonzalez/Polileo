@@ -480,8 +480,19 @@ function findPoles(html) {
   const poles = [];
   const seen = new Set();
   const titles = new Map();
+  const closedThreads = new Set();
 
   let m;
+
+  // Step 1: Find closed threads (have tema-closed icon before thread_title)
+  // Pattern: tema-closed...thread_title_XXX (closed icon appears before title in same row)
+  const closedRegex = /tema-closed[^]*?thread_title_(\d+)/gi;
+  while ((m = closedRegex.exec(html))) {
+    closedThreads.add(m[1]);
+  }
+  console.log('Polileo BG: findPoles - found', closedThreads.size, 'closed threads');
+
+  // Step 2: Extract thread titles
   const t1 = /thread_title_(\d+)[^>]*>([^<]+)</gi;
   while ((m = t1.exec(html))) titles.set(m[1], m[2].trim());
 
@@ -490,10 +501,16 @@ function findPoles(html) {
 
   console.log('Polileo BG: findPoles - found', titles.size, 'thread titles');
 
+  // Step 3: Find threads with 0 replies (whoposted shows 0)
   const r = /whoposted[^"]*t=(\d+)[^>]*>(\d+)</gi;
   while ((m = r.exec(html))) {
     const [, id, count] = m;
     if (count === '0' && titles.has(id) && !seen.has(id)) {
+      // Skip closed threads
+      if (closedThreads.has(id)) {
+        console.log('Polileo BG: Skipping CLOSED thread:', id, titles.get(id));
+        continue;
+      }
       seen.add(id);
       poles.push({
         id,
