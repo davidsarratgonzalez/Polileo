@@ -1178,27 +1178,32 @@ let selfCheckRunning = false;
 // Start self-checking for pole detection (independent of background script)
 function startSelfChecking() {
   if (selfCheckInterval || selfCheckRunning) return;
+  if (!isExtensionContextValid()) return;
 
   // Get check interval from settings
-  chrome.storage.local.get(['timings'], (result) => {
-    if (chrome.runtime.lastError) return;
-    const checkInterval = result.timings?.threadCheck || 500;
+  try {
+    chrome.storage.local.get(['timings'], (result) => {
+      if (chrome.runtime.lastError || !isExtensionContextValid()) return;
+      const checkInterval = result.timings?.threadCheck || 500;
 
-    console.log('Polileo: Starting self-check every', checkInterval, 'ms');
-    selfCheckRunning = true;
+      console.log('Polileo: Starting self-check every', checkInterval, 'ms');
+      selfCheckRunning = true;
 
-    selfCheckInterval = setInterval(() => {
-      if (!isExtensionContextValid()) {
-        stopSelfChecking();
-        return;
-      }
-      if (poleAlreadyDetected) {
-        stopSelfChecking();
-        return;
-      }
-      selfCheckForPole();
-    }, checkInterval);
-  });
+      selfCheckInterval = setInterval(() => {
+        if (!isExtensionContextValid()) {
+          stopSelfChecking();
+          return;
+        }
+        if (poleAlreadyDetected) {
+          stopSelfChecking();
+          return;
+        }
+        selfCheckForPole();
+      }, checkInterval);
+    });
+  } catch {
+    // Extension context invalidated
+  }
 }
 
 function stopSelfChecking() {

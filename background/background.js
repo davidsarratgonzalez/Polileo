@@ -480,19 +480,10 @@ function findPoles(html) {
   const poles = [];
   const seen = new Set();
   const titles = new Map();
-  const closedThreads = new Set();
 
   let m;
 
-  // Step 1: Find closed threads (have tema-closed icon before thread_title)
-  // Pattern: tema-closed...thread_title_XXX (closed icon appears before title in same row)
-  const closedRegex = /tema-closed[^]*?thread_title_(\d+)/gi;
-  while ((m = closedRegex.exec(html))) {
-    closedThreads.add(m[1]);
-  }
-  console.log('Polileo BG: findPoles - found', closedThreads.size, 'closed threads');
-
-  // Step 2: Extract thread titles
+  // Step 1: Extract thread titles
   const t1 = /thread_title_(\d+)[^>]*>([^<]+)</gi;
   while ((m = t1.exec(html))) titles.set(m[1], m[2].trim());
 
@@ -501,16 +492,30 @@ function findPoles(html) {
 
   console.log('Polileo BG: findPoles - found', titles.size, 'thread titles');
 
-  // Step 3: Find threads with 0 replies (whoposted shows 0)
+  // Step 2: Find threads with 0 replies (whoposted shows 0)
   const r = /whoposted[^"]*t=(\d+)[^>]*>(\d+)</gi;
   while ((m = r.exec(html))) {
     const [, id, count] = m;
     if (count === '0' && titles.has(id) && !seen.has(id)) {
-      // Skip closed threads
-      if (closedThreads.has(id)) {
-        console.log('Polileo BG: Skipping CLOSED thread:', id, titles.get(id));
-        continue;
+      // Check if this thread is closed by looking for tema-closed near the thread_title
+      // Search in a window of 2000 chars before thread_title_ID for tema-closed
+      const titlePos = html.indexOf(`thread_title_${id}`);
+      if (titlePos !== -1) {
+        const windowStart = Math.max(0, titlePos - 2000);
+        const windowBefore = html.substring(windowStart, titlePos);
+
+        // Check if tema-closed appears in the window AND there's no other thread_title between them
+        const lastClosedPos = windowBefore.lastIndexOf('tema-closed');
+        if (lastClosedPos !== -1) {
+          // Make sure no other thread_title appears between the closed icon and our thread
+          const betweenClosedAndTitle = windowBefore.substring(lastClosedPos);
+          if (!betweenClosedAndTitle.includes('thread_title_')) {
+            console.log('Polileo BG: Skipping CLOSED thread:', id, titles.get(id));
+            continue;
+          }
+        }
       }
+
       seen.add(id);
       poles.push({
         id,
@@ -520,6 +525,7 @@ function findPoles(html) {
     }
   }
 
+  console.log('Polileo BG: findPoles - returning', poles.length, 'poles');
   return poles;
 }
 
