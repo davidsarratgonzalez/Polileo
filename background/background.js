@@ -418,6 +418,9 @@ async function poll() {
       const poles = findPoles(html);
       console.log('Polileo BG: Found', poles.length, 'potential poles');
 
+      // Get blacklist from storage
+      const { titleBlacklist = [] } = await chrome.storage.local.get(['titleBlacklist']);
+
       // Open poles in each active window (if not already opened in that window)
       for (const [windowId, state] of activeWindows) {
         // Check window still exists
@@ -430,6 +433,18 @@ async function poll() {
 
         for (const pole of poles) {
           if (!state.openedThreads.has(pole.id)) {
+            // Check blacklist
+            const titleLower = pole.title.toLowerCase();
+            const isBlacklisted = titleBlacklist.some(term =>
+              titleLower.includes(term.toLowerCase())
+            );
+
+            if (isBlacklisted) {
+              console.log('Polileo BG: BLACKLISTED, skipping:', pole.id, pole.title);
+              state.openedThreads.add(pole.id); // Mark as opened so we don't check again
+              continue;
+            }
+
             console.log('Polileo BG: Opening new pole:', pole.id, pole.title);
             state.openedThreads.add(pole.id);
             // Cleanup old threads if limit exceeded

@@ -79,6 +79,20 @@
       </div>
     </div>
 
+    <div class="settings-section">
+      <button class="advanced-toggle" id="blacklistToggle">
+        <span class="toggle-icon">▶</span> Blacklist de títulos
+      </button>
+      <div class="advanced-content" id="blacklistContent">
+        <div class="blacklist-add">
+          <input type="text" id="blacklistInput" placeholder="Palabra o frase a ignorar">
+          <button id="blacklistAddBtn">+</button>
+        </div>
+        <ul id="blacklistList" class="blacklist-list"></ul>
+        <p class="slider-hint">Hilos con estos términos no se abrirán</p>
+      </div>
+    </div>
+
     <p class="info">
       When active, Polileo monitors Forocoches General for threads with 0 replies and opens them automatically.
     </p>
