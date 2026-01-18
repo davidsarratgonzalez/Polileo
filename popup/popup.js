@@ -122,7 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
       li.className = 'blacklist-item';
       li.innerHTML = `
         <span>${term}</span>
-        <button data-index="${index}" title="Eliminar">×</button>
+        <button data-index="${index}">×</button>
       `;
       blacklistList.appendChild(li);
     });

@@ -11,7 +11,6 @@ function isExtensionContextValid() {
 const btn = document.createElement('button');
 btn.id = 'polileo-btn';
 btn.innerHTML = `<img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="Polileo">`;
-btn.title = 'Polileo - Click to toggle';
 document.body.appendChild(btn);
 
 // Create lock button (focus lock)
@@ -118,9 +117,6 @@ document.addEventListener('visibilitychange', () => {
 
 function updateLockButton(isLocked) {
   lockBtn.innerHTML = isLocked ? lockIconSvg : unlockIconSvg;
-  lockBtn.title = isLocked
-    ? 'Focus bloqueado - nuevos hilos se abren en segundo plano'
-    : 'Focus libre - nuevos hilos robarán el foco';
   lockBtn.className = isLocked ? 'locked' : 'unlocked';
 }
 
@@ -374,7 +370,6 @@ btn.addEventListener('click', () => {
 
 function updateButton(isActive) {
   btn.className = isActive ? 'active' : 'inactive';
-  btn.title = isActive ? 'Polileo ACTIVE - Click to stop' : 'Polileo OFF - Click to start';
 }
 
 // ============================================
@@ -901,7 +896,7 @@ async function deletePost(postId) {
     // ============================================
     // STEP 2: Submit the delete request
     // ============================================
-    updateStatus('Enviando...');
+    updateStatus('Enviado...');
 
     const deleteUrl = `${baseUrl}/editpost.php`;
     const formData = new URLSearchParams();
@@ -1597,7 +1592,6 @@ function showPoleDetectedNotification(poleAuthor) {
       // Add refresh button for other's poles
       const refreshBtn = document.createElement('button');
       refreshBtn.id = 'polileo-alert-refresh';
-      refreshBtn.title = 'Recargar página';
       refreshBtn.textContent = '↻';
       refreshBtn.addEventListener('click', () => window.location.reload());
       alert.appendChild(refreshBtn);
