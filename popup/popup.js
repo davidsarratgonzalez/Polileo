@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const soundEnabledEl = document.getElementById('soundEnabled');
   const soundSuccessEl = document.getElementById('soundSuccess');
   const soundFailEl = document.getElementById('soundFail');
+  const soundDetectedEl = document.getElementById('soundDetected');
   const antifailDefaultEl = document.getElementById('antifailDefault');
   const autoLockDisabledEl = document.getElementById('autoLockDisabled');
   const hotkeyToggleEl = document.getElementById('hotkeyToggle');
@@ -64,10 +65,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load settings
-  chrome.storage.local.get(['soundEnabled', 'soundSuccess', 'soundFail', 'antifailDefault', 'autoLockDisabled', 'hotkeys', 'timings'], (result) => {
+  chrome.storage.local.get(['soundEnabled', 'soundSuccess', 'soundFail', 'soundDetected', 'antifailDefault', 'autoLockDisabled', 'hotkeys', 'timings'], (result) => {
     soundEnabledEl.checked = result.soundEnabled !== false; // Default: enabled
     soundSuccessEl.checked = result.soundSuccess !== false; // Default: enabled
-    soundFailEl.checked = result.soundFail !== false; // Default: enabled
+    soundDetectedEl.checked = result.soundDetected !== false; // Default: enabled
+    soundFailEl.checked = result.soundFail === true; // Default: disabled
     antifailDefaultEl.checked = result.antifailDefault !== false;
     autoLockDisabledEl.checked = result.autoLockDisabled || false;
 
@@ -97,6 +99,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   soundFailEl.addEventListener('change', () => {
     chrome.storage.local.set({ soundFail: soundFailEl.checked });
+  });
+
+  soundDetectedEl.addEventListener('change', () => {
+    chrome.storage.local.set({ soundDetected: soundDetectedEl.checked });
   });
 
   antifailDefaultEl.addEventListener('change', () => {

@@ -59,14 +59,27 @@ async function playSuccessSound() {
   }
 }
 
-async function playFailSound() {
+// Tu post no fue pole (sad, you tried and failed)
+async function playNotPoleSound() {
   try {
     const { soundFail } = await chrome.storage.local.get(['soundFail']);
-    if (soundFail === false) return;
+    if (soundFail !== true) return; // Default: disabled
     await ensureOffscreenDocument();
-    await chrome.runtime.sendMessage({ action: 'playFailSound' });
+    await chrome.runtime.sendMessage({ action: 'playNotPoleSound' });
   } catch (e) {
-    console.log('Polileo BG: Could not play fail sound:', e.message);
+    console.log('Polileo BG: Could not play not-pole sound:', e.message);
+  }
+}
+
+// Alguien más hizo la pole (informational detection)
+async function playPoleDetectedSound() {
+  try {
+    const { soundDetected } = await chrome.storage.local.get(['soundDetected']);
+    if (soundDetected === false) return;
+    await ensureOffscreenDocument();
+    await chrome.runtime.sendMessage({ action: 'playPoleDetectedSound' });
+  } catch (e) {
+    console.log('Polileo BG: Could not play pole-detected sound:', e.message);
   }
 }
 
@@ -112,6 +125,7 @@ chrome.storage.onChanged.addListener((changes) => {
 // Per-window state: { windowId: { isActive, openedThreads } }
 const windowStates = new Map();
 let pollTimer = null;
+let storageLoaded = false; // Flag to prevent badge updates before storage is loaded
 
 // Thread watching: { threadId: { tabId, initialCount, lastNotifiedCount } }
 const watchedThreads = new Map();
@@ -161,7 +175,11 @@ chrome.storage.local.get(['windowStates'], (result) => {
       });
     }
   }
+  storageLoaded = true; // Mark storage as loaded before updating badges
+  console.log('Polileo BG: Storage loaded, windowStates:', windowStates.size, 'entries');
   updatePolling();
+  // Update badges for all windows after restoring state
+  updateAllBadges();
 });
 
 // Alarm wakes up service worker if it sleeps
@@ -184,11 +202,21 @@ chrome.windows.onRemoved.addListener((windowId) => {
   updatePolling();
 });
 
-// When a tab is moved to a new window, notify it of the new window's status
+// When a new tab is created, set its badge based on window state
+chrome.tabs.onCreated.addListener((tab) => {
+  if (tab.id && tab.windowId) {
+    updateTabBadge(tab.id, tab.windowId);
+  }
+});
+
+// When a tab is moved to a new window, notify it and update badge
 chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
   const newWindowId = attachInfo.newWindowId;
   const state = windowStates.get(newWindowId);
   const isActive = state?.isActive || false;
+
+  // Update badge for the new window
+  updateTabBadge(tabId, newWindowId);
 
   chrome.tabs.sendMessage(tabId, {
     action: 'windowStatusChanged',
@@ -283,9 +311,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Content script requesting success sound (pole conseguida)
     playSuccessSound().then(() => sendResponse({ success: true }));
     return true;
-  } else if (msg.action === 'requestFailSound') {
-    // Content script requesting fail sound (pole fallada)
-    playFailSound().then(() => sendResponse({ success: true }));
+  } else if (msg.action === 'requestNotPoleSound') {
+    // Content script requesting not-pole sound (your post wasn't pole)
+    playNotPoleSound().then(() => sendResponse({ success: true }));
+    return true;
+  } else if (msg.action === 'requestPoleDetectedSound') {
+    // Content script requesting pole-detected sound (someone else got pole)
+    playPoleDetectedSound().then(() => sendResponse({ success: true }));
     return true;
   }
 });
@@ -332,6 +364,11 @@ function extractThreadIdFromUrl(url) {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // Only act when the page has finished loading
   if (changeInfo.status !== 'complete') return;
+
+  // Always update badge when tab finishes loading (Chrome may have reset it)
+  if (tab.windowId) {
+    updateTabBadge(tabId, tab.windowId);
+  }
 
   const threadId = extractThreadIdFromUrl(tab.url);
   if (!threadId) return;
@@ -636,6 +673,26 @@ async function shouldLockFocusForWindow(windowId) {
   return focusLockManual || false;
 }
 
+// Update badge for a single tab
+function updateTabBadge(tabId, windowId) {
+  // Don't update badges until storage is loaded (prevents race condition)
+  if (!storageLoaded) {
+    console.log('Polileo BG: Skipping badge update, storage not loaded yet');
+    return;
+  }
+
+  const state = windowStates.get(windowId);
+  const isActive = state?.isActive || false;
+
+  try {
+    chrome.action.setBadgeText({ text: isActive ? 'ON' : '', tabId: tabId });
+    chrome.action.setBadgeBackgroundColor({ color: '#4CAF50', tabId: tabId });
+  } catch {
+    // Tab might not exist
+  }
+}
+
+// Update badges for all tabs in a specific window
 async function updateBadge(windowId) {
   const state = windowStates.get(windowId);
   const isActive = state?.isActive || false;
@@ -648,6 +705,21 @@ async function updateBadge(windowId) {
     }
   } catch {
     // Window might not exist
+  }
+}
+
+// Update badges for ALL windows (used on startup)
+async function updateAllBadges() {
+  for (const [windowId, state] of windowStates) {
+    try {
+      const tabs = await chrome.tabs.query({ windowId: parseInt(windowId) });
+      for (const tab of tabs) {
+        chrome.action.setBadgeText({ text: state.isActive ? 'ON' : '', tabId: tab.id });
+        chrome.action.setBadgeBackgroundColor({ color: '#4CAF50', tabId: tab.id });
+      }
+    } catch {
+      // Window might not exist anymore
+    }
   }
 }
 

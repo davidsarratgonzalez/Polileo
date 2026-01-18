@@ -730,14 +730,26 @@ function checkPostPositionAndOfferDelete(postId) {
   if (ourPosition > 2) {
     console.log('Polileo: NOT POLE! Showing delete toast...');
     showDeleteToast(postId);
+    // Play not-pole sound only if this tab is focused
+    if (document.hasFocus()) {
+      safeSendMessage({ action: 'requestNotPoleSound' });
+    }
   } else if (ourPosition === 2) {
     console.log('Polileo: POLE! Congratulations!');
+    // Play success sound only if this tab is focused
+    if (document.hasFocus()) {
+      safeSendMessage({ action: 'requestSuccessSound' });
+    }
   } else if (ourPosition === 1) {
     console.log('Polileo: This is the OP');
   } else {
     console.log('Polileo: Could not determine position - showing delete option anyway');
     // Show delete option anyway since we can't be sure
     showDeleteToast(postId);
+    // Play not-pole sound only if this tab is focused
+    if (document.hasFocus()) {
+      safeSendMessage({ action: 'requestNotPoleSound' });
+    }
   }
 }
 
@@ -850,20 +862,22 @@ async function deletePost(postId) {
     }
   };
 
-  // Helper for fetch with timeout
+  // Helper for fetch with timeout - returns { response, text } or throws
   const fetchWithTimeout = async (url, options = {}) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
       clearTimeout(timeoutId);
-      return response;
+      // Also read text inside try-catch to handle network drops during read
+      const text = await response.text();
+      return { response, text };
     } catch (e) {
       clearTimeout(timeoutId);
       if (e.name === 'AbortError') {
         throw new Error('Timeout - servidor lento');
       }
-      throw new Error('Error de red');
+      throw new Error('Error de red - revisa tu conexión');
     }
   };
 
@@ -879,12 +893,10 @@ async function deletePost(postId) {
     const deletePageUrl = `${baseUrl}/editpost.php?do=editpost&p=${postId}`;
     console.log('Polileo: [DELETE] Step 1 - Fetching edit page:', deletePageUrl);
 
-    const editResp = await fetchWithTimeout(deletePageUrl, { credentials: 'include' });
+    const { response: editResp, text: editHtml } = await fetchWithTimeout(deletePageUrl, { credentials: 'include' });
     if (!editResp.ok) {
       throw new Error(`No se pudo acceder al post (${editResp.status})`);
     }
-
-    const editHtml = await editResp.text();
 
     // Check if we have delete permission (look for delete button/option)
     const hasDeleteOption = editHtml.includes('do=deletepost') ||
@@ -935,7 +947,7 @@ async function deletePost(postId) {
     console.log('Polileo: [DELETE] Step 2 - Submitting delete to:', deleteUrl);
     console.log('Polileo: [DELETE] Form data:', formData.toString());
 
-    const deleteResp = await fetchWithTimeout(deleteUrl, {
+    const { response: deleteResp, text: deleteRespHtml } = await fetchWithTimeout(deleteUrl, {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -947,7 +959,6 @@ async function deletePost(postId) {
     });
 
     console.log('Polileo: [DELETE] Response status:', deleteResp.status);
-    const deleteRespHtml = await deleteResp.text();
 
     // ============================================
     // STEP 3: Analyze the delete response
@@ -1606,8 +1617,7 @@ function showPoleDetectedNotification(poleAuthor) {
     if (isOwnPole) {
       alert.classList.add('success');
       console.log('Polileo: Creating SUCCESS toast (green, no refresh)');
-      // Play success sound
-      safeSendMessage({ action: 'requestSuccessSound' });
+      // Note: Success sound is handled by checkPostPositionAndOfferDelete to avoid double sounds
     } else {
       // Add refresh button for other's poles
       const refreshBtn = document.createElement('button');
@@ -1616,8 +1626,10 @@ function showPoleDetectedNotification(poleAuthor) {
       refreshBtn.addEventListener('click', () => window.location.reload());
       alert.appendChild(refreshBtn);
       console.log('Polileo: Creating FAIL toast (red, with refresh)');
-      // Play fail sound
-      safeSendMessage({ action: 'requestFailSound' });
+      // Play pole-detected sound only if this tab is focused
+      if (document.hasFocus()) {
+        safeSendMessage({ action: 'requestPoleDetectedSound' });
+      }
     }
 
     document.body.appendChild(alert);
