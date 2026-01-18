@@ -138,7 +138,10 @@ const defaultHotkeys = {
     : { key: 's', ctrl: false, alt: true, meta: false, shift: false },
   deletePost: isMac
     ? { key: 'Backspace', ctrl: false, alt: false, meta: true, shift: false }
-    : { key: 'Backspace', ctrl: false, alt: true, meta: false, shift: false }
+    : { key: 'Backspace', ctrl: false, alt: true, meta: false, shift: false },
+  togglePolileo: isMac
+    ? { key: 'p', ctrl: false, alt: false, meta: true, shift: true }
+    : { key: 'p', ctrl: false, alt: true, meta: false, shift: true }
 };
 
 let currentHotkeys = { ...defaultHotkeys };
@@ -189,6 +192,16 @@ document.addEventListener('keydown', (e) => {
   if (matchesHotkey(e, currentHotkeys.focusReply) && !isTyping) {
     e.preventDefault();
     focusReplyBox();
+    return;
+  }
+
+  // Check togglePolileo hotkey
+  if (matchesHotkey(e, currentHotkeys.togglePolileo)) {
+    e.preventDefault();
+    e.stopPropagation();
+    safeSendMessage({ action: 'toggle' }, (response) => {
+      if (response) updateButton(response.isActive);
+    });
     return;
   }
 

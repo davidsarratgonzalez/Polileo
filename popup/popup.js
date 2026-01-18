@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusEl = document.getElementById('status');
   const antifailDefaultEl = document.getElementById('antifailDefault');
   const autoLockDisabledEl = document.getElementById('autoLockDisabled');
+  const hotkeyToggleEl = document.getElementById('hotkeyToggle');
   const hotkeyLockEl = document.getElementById('hotkeyLock');
   const hotkeyFocusEl = document.getElementById('hotkeyFocus');
   const hotkeySubmitEl = document.getElementById('hotkeySubmit');
@@ -27,6 +28,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Default hotkeys
   const defaultHotkeys = {
+    togglePolileo: isMac
+      ? { key: 'p', ctrl: false, alt: false, meta: true, shift: true }
+      : { key: 'p', ctrl: false, alt: true, meta: false, shift: true },
     toggleLock: { key: 'Escape', ctrl: false, alt: false, meta: false, shift: false },
     focusReply: { key: 'Tab', ctrl: false, alt: false, meta: false, shift: false },
     submitReply: isMac
@@ -58,6 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
     autoLockDisabledEl.checked = result.autoLockDisabled || false;
 
     const hotkeys = result.hotkeys || defaultHotkeys;
+    updateHotkeyDisplay(hotkeyToggleEl, hotkeys.togglePolileo || defaultHotkeys.togglePolileo);
     updateHotkeyDisplay(hotkeyLockEl, hotkeys.toggleLock || defaultHotkeys.toggleLock);
     updateHotkeyDisplay(hotkeyFocusEl, hotkeys.focusReply || defaultHotkeys.focusReply);
     updateHotkeyDisplay(hotkeySubmitEl, hotkeys.submitReply || defaultHotkeys.submitReply);
@@ -191,6 +196,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Hotkey recording
+  hotkeyToggleEl.addEventListener('click', () => startRecording(hotkeyToggleEl));
   hotkeyLockEl.addEventListener('click', () => startRecording(hotkeyLockEl));
   hotkeyFocusEl.addEventListener('click', () => startRecording(hotkeyFocusEl));
   hotkeySubmitEl.addEventListener('click', () => startRecording(hotkeySubmitEl));
@@ -275,14 +281,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateUI(isActive) {
     if (isActive) {
-      statusEl.textContent = 'Active';
+      statusEl.textContent = 'Activo';
       statusEl.className = 'status active';
-      toggleBtn.textContent = 'Deactivate';
+      toggleBtn.textContent = 'Desactivar';
       toggleBtn.className = 'toggle-btn deactivate';
     } else {
-      statusEl.textContent = 'Inactive';
+      statusEl.textContent = 'Inactivo';
       statusEl.className = 'status inactive';
-      toggleBtn.textContent = 'Activate';
+      toggleBtn.textContent = 'Activar';
       toggleBtn.className = 'toggle-btn activate';
     }
   }

@@ -11,48 +11,51 @@
     <h1>Polileo</h1>
 
     <div class="status-container">
-      <span class="status-label">Status:</span>
-      <span id="status" class="status inactive">Inactive</span>
+      <span class="status-label">Estado:</span>
+      <span id="status" class="status inactive">Inactivo</span>
     </div>
 
     <button id="toggleBtn" class="toggle-btn">
-      Activate
+      Activar
     </button>
 
     <div class="settings-section">
       <div class="setting-item">
         <label for="antifailDefault">
           <input type="checkbox" id="antifailDefault" checked>
-          <span>Anti-fail activado por defecto</span>
+          <span>Anti-fail por defecto</span>
         </label>
       </div>
       <div class="setting-item">
         <label for="autoLockDisabled">
           <input type="checkbox" id="autoLockDisabled">
-          <span>No forzar candado en hilos abiertos por Polileo</span>
+          <span>No auto-lockear</span>
         </label>
       </div>
     </div>
 
     <div class="settings-section">
-      <h3 class="section-title">Hotkeys</h3>
+      <h3 class="section-title">Atajos</h3>
       <div class="hotkey-item">
-        <span class="hotkey-label">Toggle candado</span>
-        <button class="hotkey-input" id="hotkeyLock" data-key="toggleLock">Escape</button>
+        <span class="hotkey-label">Activar/desactivar</span>
+        <button class="hotkey-input" id="hotkeyToggle" data-key="togglePolileo">-</button>
+      </div>
+      <div class="hotkey-item">
+        <span class="hotkey-label">Candado</span>
+        <button class="hotkey-input" id="hotkeyLock" data-key="toggleLock">-</button>
       </div>
       <div class="hotkey-item">
         <span class="hotkey-label">Enfocar respuesta</span>
-        <button class="hotkey-input" id="hotkeyFocus" data-key="focusReply">Tab</button>
+        <button class="hotkey-input" id="hotkeyFocus" data-key="focusReply">-</button>
       </div>
       <div class="hotkey-item">
         <span class="hotkey-label">Enviar respuesta</span>
-        <button class="hotkey-input" id="hotkeySubmit" data-key="submitReply">Cmd+S / Alt+S</button>
+        <button class="hotkey-input" id="hotkeySubmit" data-key="submitReply">-</button>
       </div>
       <div class="hotkey-item">
-        <span class="hotkey-label">Borrar mensaje fail</span>
-        <button class="hotkey-input" id="hotkeyDelete" data-key="deletePost">Cmd+⌫ / Alt+⌫</button>
+        <span class="hotkey-label">Borrar fail</span>
+        <button class="hotkey-input" id="hotkeyDelete" data-key="deletePost">-</button>
       </div>
-      <p class="hotkey-hint">Click para cambiar, Escape para cancelar</p>
     </div>
 
     <div class="settings-section">
@@ -62,7 +65,7 @@
       <div class="advanced-content" id="advancedContent">
         <div class="slider-item">
           <div class="slider-header">
-            <span class="slider-label">Polling foro</span>
+            <span class="slider-label">Check foro</span>
             <span class="slider-value" id="pollIntervalValue">500ms</span>
           </div>
           <input type="range" id="pollInterval" min="100" max="10000" step="50" value="500">
@@ -70,18 +73,18 @@
         </div>
         <div class="slider-item">
           <div class="slider-header">
-            <span class="slider-label">Check hilos</span>
+            <span class="slider-label">Check hilo</span>
             <span class="slider-value" id="threadCheckValue">500ms</span>
           </div>
           <input type="range" id="threadCheck" min="100" max="10000" step="50" value="500">
-          <p class="slider-hint">Intervalo de detección de poles</p>
+          <p class="slider-hint">Intervalo de detección de pole en hilo</p>
         </div>
       </div>
     </div>
 
     <div class="settings-section">
       <button class="advanced-toggle" id="blacklistToggle">
-        <span class="toggle-icon">▶</span> Blacklist de títulos
+        <span class="toggle-icon">▶</span> Blacklist en títulos
       </button>
       <div class="advanced-content" id="blacklistContent">
         <div class="blacklist-add">
@@ -89,13 +92,9 @@
           <button id="blacklistAddBtn">+</button>
         </div>
         <ul id="blacklistList" class="blacklist-list"></ul>
-        <p class="slider-hint">Hilos con estos términos no se abrirán</p>
+        <p class="slider-hint">Los hilos con estos términos serán ignorados</p>
       </div>
     </div>
-
-    <p class="info">
-      When active, Polileo monitors Forocoches General for threads with 0 replies and opens them automatically.
-    </p>
   </div>
 
   <script src="popup.js"></script>
