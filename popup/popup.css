@@ -45,6 +45,21 @@ h1 {
   color: #FD5D4D;
 }
 
+.header-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.quote {
+  font-size: 8px;
+  color: #999;
+  font-style: italic;
+  margin-top: 4px;
+  letter-spacing: 0.3px;
+  padding-left: 10px;
+  text-indent: -10px;
+}
+
 .status-container {
   display: flex;
   align-items: center;
