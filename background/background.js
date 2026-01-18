@@ -593,9 +593,9 @@ async function poll() {
             await playNotificationSound();
             // Check if we should lock focus for this window
             const shouldLock = await shouldLockFocusForWindow(windowId);
-            // Add polileo=1 param so content script knows this was auto-opened
+            // Add polileo param so content script knows this was auto-opened
             // If focus lock is ON, open in background (active: false)
-            chrome.tabs.create({ url: `${pole.url}&polileo=1`, active: !shouldLock, windowId });
+            chrome.tabs.create({ url: `${pole.url}&polileo`, active: !shouldLock, windowId });
           } else {
             console.log('Polileo BG: Pole already opened:', pole.id);
           }
@@ -686,7 +686,7 @@ async function shouldLockFocusForWindow(windowId) {
     const [activeTab] = await chrome.tabs.query({ active: true, windowId: windowId });
 
     // If active tab is a polileo-opened thread AND doesn't have pole yet, lock
-    if (activeTab?.url?.includes('polileo=1') && !tabsWithPole.has(activeTab.id)) {
+    if (activeTab?.url && new URL(activeTab.url).searchParams.has('polileo') && !tabsWithPole.has(activeTab.id)) {
       return true;
     }
   } catch {
