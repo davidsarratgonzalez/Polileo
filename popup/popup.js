@@ -157,12 +157,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderBlacklist(blacklist) {
     blacklistList.innerHTML = '';
-    blacklist.forEach((term, index) => {
+    // Sort alphabetically (case-insensitive)
+    const sorted = [...blacklist].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    sorted.forEach((term) => {
       const li = document.createElement('li');
       li.className = 'blacklist-item';
       li.innerHTML = `
         <span>${term}</span>
-        <button data-index="${index}">×</button>
+        <button data-term="${term}">×</button>
       `;
       blacklistList.appendChild(li);
     });
@@ -170,7 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add click handlers for remove buttons
     blacklistList.querySelectorAll('button').forEach(btn => {
       btn.addEventListener('click', () => {
-        removeBlacklistItem(parseInt(btn.dataset.index));
+        removeBlacklistItem(btn.dataset.term);
       });
     });
   }
@@ -189,13 +191,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function removeBlacklistItem(index) {
+  function removeBlacklistItem(term) {
     chrome.storage.local.get(['titleBlacklist'], (result) => {
       const blacklist = result.titleBlacklist || [];
-      blacklist.splice(index, 1);
-      chrome.storage.local.set({ titleBlacklist: blacklist }, () => {
-        renderBlacklist(blacklist);
-      });
+      const index = blacklist.indexOf(term);
+      if (index > -1) {
+        blacklist.splice(index, 1);
+        chrome.storage.local.set({ titleBlacklist: blacklist }, () => {
+          renderBlacklist(blacklist);
+        });
+      }
     });
   }
 
