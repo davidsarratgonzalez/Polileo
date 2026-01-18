@@ -39,15 +39,34 @@ async function ensureOffscreenDocument() {
 
 async function playNotificationSound() {
   try {
-    // Check if sound is enabled
     const { soundEnabled } = await chrome.storage.local.get(['soundEnabled']);
-    if (soundEnabled === false) {
-      return; // Sound disabled
-    }
+    if (soundEnabled === false) return;
     await ensureOffscreenDocument();
-    await chrome.runtime.sendMessage({ action: 'playSound' });
+    await chrome.runtime.sendMessage({ action: 'playNewThreadSound' });
   } catch (e) {
     console.log('Polileo BG: Could not play sound:', e.message);
+  }
+}
+
+async function playSuccessSound() {
+  try {
+    const { soundSuccess } = await chrome.storage.local.get(['soundSuccess']);
+    if (soundSuccess === false) return;
+    await ensureOffscreenDocument();
+    await chrome.runtime.sendMessage({ action: 'playSuccessSound' });
+  } catch (e) {
+    console.log('Polileo BG: Could not play success sound:', e.message);
+  }
+}
+
+async function playFailSound() {
+  try {
+    const { soundFail } = await chrome.storage.local.get(['soundFail']);
+    if (soundFail === false) return;
+    await ensureOffscreenDocument();
+    await chrome.runtime.sendMessage({ action: 'playFailSound' });
+  } catch (e) {
+    console.log('Polileo BG: Could not play fail sound:', e.message);
   }
 }
 
@@ -259,6 +278,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       tabsWithPole.add(tabId);
     }
     sendResponse({ success: true });
+    return true;
+  } else if (msg.action === 'requestSuccessSound') {
+    // Content script requesting success sound (pole conseguida)
+    playSuccessSound().then(() => sendResponse({ success: true }));
+    return true;
+  } else if (msg.action === 'requestFailSound') {
+    // Content script requesting fail sound (pole fallada)
+    playFailSound().then(() => sendResponse({ success: true }));
     return true;
   }
 });

@@ -1606,6 +1606,8 @@ function showPoleDetectedNotification(poleAuthor) {
     if (isOwnPole) {
       alert.classList.add('success');
       console.log('Polileo: Creating SUCCESS toast (green, no refresh)');
+      // Play success sound
+      safeSendMessage({ action: 'requestSuccessSound' });
     } else {
       // Add refresh button for other's poles
       const refreshBtn = document.createElement('button');
@@ -1614,6 +1616,8 @@ function showPoleDetectedNotification(poleAuthor) {
       refreshBtn.addEventListener('click', () => window.location.reload());
       alert.appendChild(refreshBtn);
       console.log('Polileo: Creating FAIL toast (red, with refresh)');
+      // Play fail sound
+      safeSendMessage({ action: 'requestFailSound' });
     }
 
     document.body.appendChild(alert);
