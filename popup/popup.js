@@ -9,6 +9,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const hotkeySubmitEl = document.getElementById('hotkeySubmit');
   const hotkeyDeleteEl = document.getElementById('hotkeyDelete');
 
+  // Hotkeys toggle elements
+  const hotkeysToggle = document.getElementById('hotkeysToggle');
+  const hotkeysContent = document.getElementById('hotkeysContent');
+
   // Advanced config elements
   const advancedToggle = document.getElementById('advancedToggle');
   const advancedContent = document.getElementById('advancedContent');
@@ -83,6 +87,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   autoLockDisabledEl.addEventListener('change', () => {
     chrome.storage.local.set({ autoLockDisabled: autoLockDisabledEl.checked });
+  });
+
+  // Hotkeys toggle
+  hotkeysToggle.addEventListener('click', () => {
+    hotkeysToggle.classList.toggle('open');
+    hotkeysContent.classList.toggle('open');
   });
 
   // Advanced toggle

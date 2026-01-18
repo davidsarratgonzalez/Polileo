@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,7 +8,10 @@
 </head>
 <body>
   <div class="container">
-    <h1>Polileo</h1>
+    <div class="header">
+      <img src="../polileo.png" alt="Polileo" class="logo">
+      <h1>Polileo</h1>
+    </div>
 
     <div class="status-container">
       <span class="status-label">Estado:</span>
@@ -20,49 +23,50 @@
     </button>
 
     <div class="settings-section">
-      <div class="setting-item">
-        <label for="antifailDefault">
-          <input type="checkbox" id="antifailDefault" checked>
-          <span>Anti-fail por defecto</span>
-        </label>
-      </div>
-      <div class="setting-item">
-        <label for="autoLockDisabled">
-          <input type="checkbox" id="autoLockDisabled">
-          <span>No auto-lockear</span>
-        </label>
-      </div>
-    </div>
-
-    <div class="settings-section">
-      <h3 class="section-title">Atajos</h3>
-      <div class="hotkey-item">
-        <span class="hotkey-label">Activar/desactivar</span>
-        <button class="hotkey-input" id="hotkeyToggle" data-key="togglePolileo">-</button>
-      </div>
-      <div class="hotkey-item">
-        <span class="hotkey-label">Candado</span>
-        <button class="hotkey-input" id="hotkeyLock" data-key="toggleLock">-</button>
-      </div>
-      <div class="hotkey-item">
-        <span class="hotkey-label">Enfocar respuesta</span>
-        <button class="hotkey-input" id="hotkeyFocus" data-key="focusReply">-</button>
-      </div>
-      <div class="hotkey-item">
-        <span class="hotkey-label">Enviar respuesta</span>
-        <button class="hotkey-input" id="hotkeySubmit" data-key="submitReply">-</button>
-      </div>
-      <div class="hotkey-item">
-        <span class="hotkey-label">Borrar fail</span>
-        <button class="hotkey-input" id="hotkeyDelete" data-key="deletePost">-</button>
+      <button class="advanced-toggle" id="hotkeysToggle">
+        <span class="toggle-icon">▶</span> Atajos
+      </button>
+      <div class="advanced-content" id="hotkeysContent">
+        <div class="hotkey-item">
+          <span class="hotkey-label">Activar/desactivar</span>
+          <button class="hotkey-input" id="hotkeyToggle" data-key="togglePolileo">-</button>
+        </div>
+        <div class="hotkey-item">
+          <span class="hotkey-label">Lockear hilo</span>
+          <button class="hotkey-input" id="hotkeyLock" data-key="toggleLock">-</button>
+        </div>
+        <div class="hotkey-item">
+          <span class="hotkey-label">Enfocar respuesta</span>
+          <button class="hotkey-input" id="hotkeyFocus" data-key="focusReply">-</button>
+        </div>
+        <div class="hotkey-item">
+          <span class="hotkey-label">Enviar respuesta</span>
+          <button class="hotkey-input" id="hotkeySubmit" data-key="submitReply">-</button>
+        </div>
+        <div class="hotkey-item">
+          <span class="hotkey-label">Borrar fail</span>
+          <button class="hotkey-input" id="hotkeyDelete" data-key="deletePost">-</button>
+        </div>
       </div>
     </div>
 
     <div class="settings-section">
       <button class="advanced-toggle" id="advancedToggle">
-        <span class="toggle-icon">▶</span> Configuración avanzada
+        <span class="toggle-icon">▶</span> Configuración
       </button>
       <div class="advanced-content" id="advancedContent">
+        <div class="setting-item">
+          <label for="antifailDefault">
+            <input type="checkbox" id="antifailDefault" checked>
+            <span>Anti-fail por defecto</span>
+          </label>
+        </div>
+        <div class="setting-item">
+          <label for="autoLockDisabled">
+            <input type="checkbox" id="autoLockDisabled">
+            <span>No auto-lockear</span>
+          </label>
+        </div>
         <div class="slider-item">
           <div class="slider-header">
             <span class="slider-label">Check foro</span>
