@@ -841,11 +841,29 @@ deleteHotkeyObserver.observe(document.body, { childList: true, subtree: true });
 async function deletePost(postId) {
   const deleteBtn = document.getElementById('polileo-delete-btn');
   const toast = document.getElementById('polileo-delete-toast');
+  const FETCH_TIMEOUT = 8000; // 8 seconds timeout
 
   const updateStatus = (text) => {
     if (deleteBtn) {
       deleteBtn.textContent = text;
       deleteBtn.disabled = true;
+    }
+  };
+
+  // Helper for fetch with timeout
+  const fetchWithTimeout = async (url, options = {}) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (e) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        throw new Error('Timeout - servidor lento');
+      }
+      throw new Error('Error de red');
     }
   };
 
@@ -861,7 +879,7 @@ async function deletePost(postId) {
     const deletePageUrl = `${baseUrl}/editpost.php?do=editpost&p=${postId}`;
     console.log('Polileo: [DELETE] Step 1 - Fetching edit page:', deletePageUrl);
 
-    const editResp = await fetch(deletePageUrl, { credentials: 'include' });
+    const editResp = await fetchWithTimeout(deletePageUrl, { credentials: 'include' });
     if (!editResp.ok) {
       throw new Error(`No se pudo acceder al post (${editResp.status})`);
     }
@@ -917,7 +935,7 @@ async function deletePost(postId) {
     console.log('Polileo: [DELETE] Step 2 - Submitting delete to:', deleteUrl);
     console.log('Polileo: [DELETE] Form data:', formData.toString());
 
-    const deleteResp = await fetch(deleteUrl, {
+    const deleteResp = await fetchWithTimeout(deleteUrl, {
       method: 'POST',
       credentials: 'include',
       headers: {

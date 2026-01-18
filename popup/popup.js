@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   const toggleBtn = document.getElementById('toggleBtn');
   const statusEl = document.getElementById('status');
+  const soundEnabledEl = document.getElementById('soundEnabled');
   const antifailDefaultEl = document.getElementById('antifailDefault');
   const autoLockDisabledEl = document.getElementById('autoLockDisabled');
   const hotkeyToggleEl = document.getElementById('hotkeyToggle');
@@ -61,7 +62,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load settings
-  chrome.storage.local.get(['antifailDefault', 'autoLockDisabled', 'hotkeys', 'timings'], (result) => {
+  chrome.storage.local.get(['soundEnabled', 'antifailDefault', 'autoLockDisabled', 'hotkeys', 'timings'], (result) => {
+    soundEnabledEl.checked = result.soundEnabled !== false; // Default: enabled
     antifailDefaultEl.checked = result.antifailDefault !== false;
     autoLockDisabledEl.checked = result.autoLockDisabled || false;
 
@@ -81,6 +83,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Save settings on change
+  soundEnabledEl.addEventListener('change', () => {
+    chrome.storage.local.set({ soundEnabled: soundEnabledEl.checked });
+  });
+
   antifailDefaultEl.addEventListener('change', () => {
     chrome.storage.local.set({ antifailDefault: antifailDefaultEl.checked });
   });

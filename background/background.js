@@ -2,6 +2,54 @@ const FOROCOCHES_URL = 'https://www.forocoches.com/foro/forumdisplay.php?f=2';
 const ALARM_NAME = 'polileo-keepalive';
 const THREAD_WATCH_ALARM = 'polileo-thread-watch';
 const MAX_OPENED_THREADS = 100;
+const OFFSCREEN_DOCUMENT_PATH = 'offscreen/offscreen.html';
+
+// ============================================
+// Offscreen Document for Audio Playback
+// ============================================
+
+let creatingOffscreen = null;
+
+async function ensureOffscreenDocument() {
+  // Check if offscreen document already exists
+  const existingContexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
+  });
+
+  if (existingContexts.length > 0) {
+    return; // Already exists
+  }
+
+  // Avoid creating multiple offscreen documents simultaneously
+  if (creatingOffscreen) {
+    await creatingOffscreen;
+    return;
+  }
+
+  creatingOffscreen = chrome.offscreen.createDocument({
+    url: OFFSCREEN_DOCUMENT_PATH,
+    reasons: ['AUDIO_PLAYBACK'],
+    justification: 'Play notification sound when new poleable thread is found'
+  });
+
+  await creatingOffscreen;
+  creatingOffscreen = null;
+}
+
+async function playNotificationSound() {
+  try {
+    // Check if sound is enabled
+    const { soundEnabled } = await chrome.storage.local.get(['soundEnabled']);
+    if (soundEnabled === false) {
+      return; // Sound disabled
+    }
+    await ensureOffscreenDocument();
+    await chrome.runtime.sendMessage({ action: 'playSound' });
+  } catch (e) {
+    console.log('Polileo BG: Could not play sound:', e.message);
+  }
+}
 
 // Timing defaults
 const DEFAULT_TIMINGS = {
@@ -452,6 +500,8 @@ async function poll() {
               const oldest = state.openedThreads.values().next().value;
               state.openedThreads.delete(oldest);
             }
+            // Play notification sound before opening the tab
+            await playNotificationSound();
             // Check if we should lock focus for this window
             const shouldLock = await shouldLockFocusForWindow(windowId);
             // Add polileo=1 param so content script knows this was auto-opened

@@ -5,7 +5,8 @@
   "permissions": [
     "storage",
     "tabs",
-    "alarms"
+    "alarms",
+    "offscreen"
   ],
   "host_permissions": [
     "https://www.forocoches.com/*",
