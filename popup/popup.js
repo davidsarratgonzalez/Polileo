@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   const toggleBtn = document.getElementById('toggleBtn');
   const statusEl = document.getElementById('status');
+  const logoEl = document.querySelector('.logo');
   const soundEnabledEl = document.getElementById('soundEnabled');
   const soundSuccessEl = document.getElementById('soundSuccess');
   const soundFailEl = document.getElementById('soundFail');
@@ -340,11 +341,13 @@ document.addEventListener('DOMContentLoaded', () => {
       statusEl.className = 'status active';
       toggleBtn.textContent = 'Desactivar';
       toggleBtn.className = 'toggle-btn deactivate';
+      logoEl.classList.add('dancing');
     } else {
       statusEl.textContent = 'Inactivo';
       statusEl.className = 'status inactive';
       toggleBtn.textContent = 'Activar';
       toggleBtn.className = 'toggle-btn activate';
+      logoEl.classList.remove('dancing');
     }
   }
 });
