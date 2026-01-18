@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const soundSuccessEl = document.getElementById('soundSuccess');
   const soundFailEl = document.getElementById('soundFail');
   const soundDetectedEl = document.getElementById('soundDetected');
+  const soundOnlyWhenActiveEl = document.getElementById('soundOnlyWhenActive');
   const antifailDefaultEl = document.getElementById('antifailDefault');
   const autoLockDisabledEl = document.getElementById('autoLockDisabled');
   const hotkeyToggleEl = document.getElementById('hotkeyToggle');
@@ -16,6 +17,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Hotkeys toggle elements
   const hotkeysToggle = document.getElementById('hotkeysToggle');
   const hotkeysContent = document.getElementById('hotkeysContent');
+
+  // Audio toggle elements
+  const audioToggle = document.getElementById('audioToggle');
+  const audioContent = document.getElementById('audioContent');
 
   // Advanced config elements
   const advancedToggle = document.getElementById('advancedToggle');
@@ -65,11 +70,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load settings
-  chrome.storage.local.get(['soundEnabled', 'soundSuccess', 'soundFail', 'soundDetected', 'antifailDefault', 'autoLockDisabled', 'hotkeys', 'timings'], (result) => {
+  chrome.storage.local.get(['soundEnabled', 'soundSuccess', 'soundFail', 'soundDetected', 'soundOnlyWhenActive', 'antifailDefault', 'autoLockDisabled', 'hotkeys', 'timings'], (result) => {
     soundEnabledEl.checked = result.soundEnabled !== false; // Default: enabled
     soundSuccessEl.checked = result.soundSuccess !== false; // Default: enabled
     soundDetectedEl.checked = result.soundDetected !== false; // Default: enabled
     soundFailEl.checked = result.soundFail === true; // Default: disabled
+    soundOnlyWhenActiveEl.checked = result.soundOnlyWhenActive !== false; // Default: enabled
     antifailDefaultEl.checked = result.antifailDefault !== false;
     autoLockDisabledEl.checked = result.autoLockDisabled || false;
 
@@ -105,6 +111,10 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.set({ soundDetected: soundDetectedEl.checked });
   });
 
+  soundOnlyWhenActiveEl.addEventListener('change', () => {
+    chrome.storage.local.set({ soundOnlyWhenActive: soundOnlyWhenActiveEl.checked });
+  });
+
   antifailDefaultEl.addEventListener('change', () => {
     chrome.storage.local.set({ antifailDefault: antifailDefaultEl.checked });
   });
@@ -117,6 +127,12 @@ document.addEventListener('DOMContentLoaded', () => {
   hotkeysToggle.addEventListener('click', () => {
     hotkeysToggle.classList.toggle('open');
     hotkeysContent.classList.toggle('open');
+  });
+
+  // Audio toggle
+  audioToggle.addEventListener('click', () => {
+    audioToggle.classList.toggle('open');
+    audioContent.classList.toggle('open');
   });
 
   // Advanced toggle

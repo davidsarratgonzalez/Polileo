@@ -136,6 +136,12 @@ h1 {
   accent-color: #FD5D4D;
 }
 
+.setting-item.separator {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #444;
+}
+
 .section-title {
   font-size: 11px;
   color: #999;

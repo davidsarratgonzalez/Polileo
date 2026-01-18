@@ -37,6 +37,19 @@ async function ensureOffscreenDocument() {
   creatingOffscreen = null;
 }
 
+// Helper to check if sound should play based on window active state
+async function shouldPlaySound(windowId) {
+  const { soundOnlyWhenActive } = await chrome.storage.local.get(['soundOnlyWhenActive']);
+  // Default: enabled (only play when Polileo is active)
+  if (soundOnlyWhenActive === false) return true; // Explicitly disabled, play always
+
+  // Check if Polileo is active for this window
+  const state = windowStates.get(windowId);
+  const isActive = state?.isActive || false;
+  console.log('Polileo BG: shouldPlaySound - windowId:', windowId, 'isActive:', isActive, 'soundOnlyWhenActive:', soundOnlyWhenActive);
+  return isActive;
+}
+
 async function playNotificationSound() {
   try {
     const { soundEnabled } = await chrome.storage.local.get(['soundEnabled']);
@@ -48,10 +61,12 @@ async function playNotificationSound() {
   }
 }
 
-async function playSuccessSound() {
+async function playSuccessSound(windowId) {
   try {
     const { soundSuccess } = await chrome.storage.local.get(['soundSuccess']);
+    console.log('Polileo BG: playSuccessSound - soundSuccess:', soundSuccess, 'windowId:', windowId);
     if (soundSuccess === false) return;
+    if (windowId && !(await shouldPlaySound(windowId))) return;
     await ensureOffscreenDocument();
     await chrome.runtime.sendMessage({ action: 'playSuccessSound' });
   } catch (e) {
@@ -60,10 +75,15 @@ async function playSuccessSound() {
 }
 
 // Tu post no fue pole (sad, you tried and failed)
-async function playNotPoleSound() {
+async function playNotPoleSound(windowId) {
   try {
     const { soundFail } = await chrome.storage.local.get(['soundFail']);
-    if (soundFail !== true) return; // Default: disabled
+    console.log('Polileo BG: playNotPoleSound - soundFail:', soundFail, 'windowId:', windowId);
+    if (soundFail !== true) {
+      console.log('Polileo BG: soundFail not enabled, skipping');
+      return; // Default: disabled
+    }
+    if (windowId && !(await shouldPlaySound(windowId))) return;
     await ensureOffscreenDocument();
     await chrome.runtime.sendMessage({ action: 'playNotPoleSound' });
   } catch (e) {
@@ -72,10 +92,12 @@ async function playNotPoleSound() {
 }
 
 // Alguien más hizo la pole (informational detection)
-async function playPoleDetectedSound() {
+async function playPoleDetectedSound(windowId) {
   try {
     const { soundDetected } = await chrome.storage.local.get(['soundDetected']);
+    console.log('Polileo BG: playPoleDetectedSound - soundDetected:', soundDetected, 'windowId:', windowId);
     if (soundDetected === false) return;
+    if (windowId && !(await shouldPlaySound(windowId))) return;
     await ensureOffscreenDocument();
     await chrome.runtime.sendMessage({ action: 'playPoleDetectedSound' });
   } catch (e) {
@@ -309,15 +331,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   } else if (msg.action === 'requestSuccessSound') {
     // Content script requesting success sound (pole conseguida)
-    playSuccessSound().then(() => sendResponse({ success: true }));
+    const windowId = sender.tab?.windowId;
+    playSuccessSound(windowId).then(() => sendResponse({ success: true }));
     return true;
   } else if (msg.action === 'requestNotPoleSound') {
     // Content script requesting not-pole sound (your post wasn't pole)
-    playNotPoleSound().then(() => sendResponse({ success: true }));
+    const windowId = sender.tab?.windowId;
+    playNotPoleSound(windowId).then(() => sendResponse({ success: true }));
     return true;
   } else if (msg.action === 'requestPoleDetectedSound') {
     // Content script requesting pole-detected sound (someone else got pole)
-    playPoleDetectedSound().then(() => sendResponse({ success: true }));
+    const windowId = sender.tab?.windowId;
+    playPoleDetectedSound(windowId).then(() => sendResponse({ success: true }));
     return true;
   }
 });

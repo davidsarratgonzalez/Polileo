@@ -51,34 +51,48 @@
     </div>
 
     <div class="settings-section">
-      <button class="advanced-toggle" id="advancedToggle">
-        <span class="toggle-icon">▶</span> Configuración
+      <button class="advanced-toggle" id="audioToggle">
+        <span class="toggle-icon">▶</span> Audio
       </button>
-      <div class="advanced-content" id="advancedContent">
+      <div class="advanced-content" id="audioContent">
         <div class="setting-item">
           <label for="soundEnabled">
             <input type="checkbox" id="soundEnabled" checked>
-            <span>Sonido nuevo hilo</span>
+            <span>Nuevo hilo detectado</span>
           </label>
         </div>
         <div class="setting-item">
           <label for="soundSuccess">
             <input type="checkbox" id="soundSuccess" checked>
-            <span>Sonido pole conseguida</span>
+            <span>Pole conseguida</span>
           </label>
         </div>
         <div class="setting-item">
           <label for="soundDetected">
             <input type="checkbox" id="soundDetected" checked>
-            <span>Sonido pole robada</span>
+            <span>Pole robada</span>
           </label>
         </div>
         <div class="setting-item">
           <label for="soundFail">
             <input type="checkbox" id="soundFail">
-            <span>Sonido post no es pole</span>
+            <span>Tu post no es pole</span>
           </label>
         </div>
+        <div class="setting-item">
+          <label for="soundOnlyWhenActive">
+            <input type="checkbox" id="soundOnlyWhenActive" checked>
+            <span>Solo con Polileo activo</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <button class="advanced-toggle" id="advancedToggle">
+        <span class="toggle-icon">▶</span> Configuración
+      </button>
+      <div class="advanced-content" id="advancedContent">
         <div class="setting-item">
           <label for="antifailDefault">
             <input type="checkbox" id="antifailDefault" checked>
