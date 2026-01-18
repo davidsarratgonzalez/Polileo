@@ -862,22 +862,20 @@ async function deletePost(postId) {
     }
   };
 
-  // Helper for fetch with timeout - returns { response, text } or throws
+  // Helper for fetch with timeout
   const fetchWithTimeout = async (url, options = {}) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
       clearTimeout(timeoutId);
-      // Also read text inside try-catch to handle network drops during read
-      const text = await response.text();
-      return { response, text };
+      return response;
     } catch (e) {
       clearTimeout(timeoutId);
       if (e.name === 'AbortError') {
         throw new Error('Timeout - servidor lento');
       }
-      throw new Error('Error de red - revisa tu conexión');
+      throw e;
     }
   };
 
@@ -893,10 +891,12 @@ async function deletePost(postId) {
     const deletePageUrl = `${baseUrl}/editpost.php?do=editpost&p=${postId}`;
     console.log('Polileo: [DELETE] Step 1 - Fetching edit page:', deletePageUrl);
 
-    const { response: editResp, text: editHtml } = await fetchWithTimeout(deletePageUrl, { credentials: 'include' });
+    const editResp = await fetchWithTimeout(deletePageUrl, { credentials: 'include' });
     if (!editResp.ok) {
       throw new Error(`No se pudo acceder al post (${editResp.status})`);
     }
+
+    const editHtml = await editResp.text();
 
     // Check if we have delete permission (look for delete button/option)
     const hasDeleteOption = editHtml.includes('do=deletepost') ||
@@ -926,7 +926,7 @@ async function deletePost(postId) {
     // ============================================
     // STEP 2: Submit the delete request
     // ============================================
-    updateStatus('Enviado...');
+    updateStatus('Enviado');
 
     const deleteUrl = `${baseUrl}/editpost.php`;
     const formData = new URLSearchParams();
@@ -947,7 +947,7 @@ async function deletePost(postId) {
     console.log('Polileo: [DELETE] Step 2 - Submitting delete to:', deleteUrl);
     console.log('Polileo: [DELETE] Form data:', formData.toString());
 
-    const { response: deleteResp, text: deleteRespHtml } = await fetchWithTimeout(deleteUrl, {
+    const deleteResp = await fetchWithTimeout(deleteUrl, {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -959,6 +959,7 @@ async function deletePost(postId) {
     });
 
     console.log('Polileo: [DELETE] Response status:', deleteResp.status);
+    const deleteRespHtml = await deleteResp.text();
 
     // ============================================
     // STEP 3: Analyze the delete response
