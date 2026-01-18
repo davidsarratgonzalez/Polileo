@@ -21,8 +21,8 @@ function playNotificationSound() {
     ctx.resume();
   }
 
-  // Two quick ascending pips - energetic and attention-grabbing
-  const frequencies = [800, 1100]; // Ascending pattern
+  // Two quick pips
+  const frequencies = [1300, 1300];
   const duration = 0.05;
   const gap = 0.03;
 
