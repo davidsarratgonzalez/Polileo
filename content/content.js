@@ -1896,3 +1896,115 @@ function safeSendMessage(msg, callback) {
   }
 }
 
+// ============================================
+// POST SUBMISSION COOLDOWN (Full Editor Pages)
+// ============================================
+// This is a completely isolated module (IIFE) that handles
+// cooldown detection when posting from FULL EDITOR pages:
+// - newthread.php (creating a new thread)
+// - newreply.php (replying via full editor)
+// Both redirect to showthread.php?p=XXX after success.
+// It does NOT modify any existing functions or variables.
+// It only uses countPostsInDOM() and showCooldownBar() which are safe.
+// ============================================
+(function fullEditorCooldownModule() {
+  'use strict';
+
+  const DEBUG = true;
+  const log = (...args) => DEBUG && console.log('Polileo [FullEditor]:', ...args);
+
+  const url = window.location.href;
+
+  // PART A: On newthread.php OR newreply.php, mark form submission
+  const isNewThread = url.includes('newthread.php?do=newthread');
+  const isNewReply = url.includes('newreply.php?do=postreply');
+
+  if (isNewThread || isNewReply) {
+    const pageType = isNewThread ? 'new thread' : 'full reply';
+    log('On', pageType, 'page, setting up detector');
+
+    // Find submit button - try multiple selectors
+    const submitBtn = document.querySelector('input[name="sbutton"]') ||
+                      document.querySelector('input[type="submit"][value*="Enviar"]') ||
+                      document.querySelector('input[type="submit"]');
+
+    if (!submitBtn) {
+      log('Submit button not found');
+      return;
+    }
+
+    const markAttempt = () => {
+      try {
+        chrome.storage.local.set({ fullEditorPostAttempt: Date.now() });
+        log('Post attempt marked (' + pageType + ')');
+      } catch (e) {
+        log('Failed to mark attempt:', e);
+      }
+    };
+
+    // Listen to both click and form submit for robustness
+    submitBtn.addEventListener('click', markAttempt);
+    const form = submitBtn.closest('form');
+    if (form) {
+      form.addEventListener('submit', markAttempt);
+    }
+
+    log('Detector active for', pageType);
+    return; // Don't run Part B on editor pages
+  }
+
+  // PART B: On showthread.php?p=XXX, check if we just posted
+  // Only run on ?p= URLs (this is where you land after posting)
+  if (!url.match(/showthread\.php\?p=\d+/)) {
+    return;
+  }
+
+  log('On ?p= URL, checking for recent post submission');
+
+  // Wait for page to fully load
+  setTimeout(() => {
+    try {
+      chrome.storage.local.get(['fullEditorPostAttempt', 'lastPostTime'], (result) => {
+        if (chrome.runtime.lastError) {
+          log('Storage error:', chrome.runtime.lastError);
+          return;
+        }
+
+        const attemptTime = result.fullEditorPostAttempt;
+        log('Attempt time from storage:', attemptTime);
+
+        if (!attemptTime) {
+          log('No recent attempt found');
+          return;
+        }
+
+        // CRITICAL: Clear flag FIRST to prevent any re-triggering on F5
+        chrome.storage.local.remove('fullEditorPostAttempt');
+        log('Flag cleared');
+
+        // Check 1: Was the attempt recent? (within 15 seconds)
+        const elapsed = Date.now() - attemptTime;
+        if (elapsed > 15000) {
+          log('Attempt too old:', elapsed, 'ms');
+          return;
+        }
+
+        // Check 2: Is cooldown already running?
+        const lastPost = result.lastPostTime || 0;
+        if (Date.now() - lastPost < 5000) {
+          log('Cooldown already running');
+          return;
+        }
+
+        // All checks passed - trigger cooldown
+        const postCount = countPostsInDOM();
+        log('✓ Post from full editor detected! Posts:', postCount, '- Starting cooldown...');
+        chrome.storage.local.set({ lastPostTime: Date.now() });
+        showCooldownBar();
+      });
+    } catch (e) {
+      log('Error:', e);
+    }
+  }, 500);
+})();
+
