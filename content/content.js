@@ -2295,7 +2295,7 @@ function safeSendMessage(msg, callback) {
       animation: slideInFromRight 0.3s ease;
     `;
 
-    const text = author ? `¡Pole robada por ${author}!` : '¡Alguien ha hecho pole!';
+    const text = author ? `¡Pole robada por ${author}!` : '¡Alguien ha hecho la pole!';
     alert.innerHTML = `
       <span>${text}</span>
       <button id="polileo-fulleditor-goback" style="
