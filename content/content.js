@@ -1404,32 +1404,55 @@ let selfCheckRunning = false;
 
 // Start self-checking for pole detection (independent of background script)
 function startSelfChecking() {
-  if (selfCheckInterval || selfCheckRunning) return;
-  if (!isExtensionContextValid()) return;
+  if (selfCheckInterval || selfCheckRunning) {
+    console.log('Polileo: [SELF-CHECK] Already running, skipping start');
+    return;
+  }
+  if (!isExtensionContextValid()) {
+    console.log('Polileo: [SELF-CHECK] Context invalid, cannot start');
+    return;
+  }
+  if (poleAlreadyDetected) {
+    console.log('Polileo: [SELF-CHECK] Pole already detected, not starting');
+    return;
+  }
 
   // Get check interval from settings
   try {
     chrome.storage.local.get(['timings'], (result) => {
-      if (chrome.runtime.lastError || !isExtensionContextValid()) return;
-      const checkInterval = result.timings?.threadCheck || 500;
+      if (chrome.runtime.lastError) {
+        console.log('Polileo: [SELF-CHECK] Storage error:', chrome.runtime.lastError);
+        return;
+      }
+      if (!isExtensionContextValid()) {
+        console.log('Polileo: [SELF-CHECK] Context became invalid during setup');
+        return;
+      }
+      if (poleAlreadyDetected) {
+        console.log('Polileo: [SELF-CHECK] Pole detected during setup, aborting');
+        return;
+      }
 
-      console.log('Polileo: Starting self-check every', checkInterval, 'ms');
+      const checkInterval = result.timings?.threadCheck || 500;
+      console.log('Polileo: [SELF-CHECK] ✓ Starting interval every', checkInterval, 'ms');
       selfCheckRunning = true;
 
       selfCheckInterval = setInterval(() => {
         if (!isExtensionContextValid()) {
+          console.log('Polileo: [SELF-CHECK] Context invalidated, stopping');
           stopSelfChecking();
           return;
         }
         if (poleAlreadyDetected) {
+          console.log('Polileo: [SELF-CHECK] Pole now detected, stopping');
           stopSelfChecking();
           return;
         }
         selfCheckForPole();
       }, checkInterval);
     });
-  } catch {
-    // Extension context invalidated
+  } catch (e) {
+    console.log('Polileo: [SELF-CHECK] Exception during start:', e.message);
   }
 }
 
@@ -1439,6 +1462,55 @@ function stopSelfChecking() {
     selfCheckInterval = null;
   }
   selfCheckRunning = false;
+  console.log('Polileo: [SELF-CHECK] Stopped');
+}
+
+// HEALTH CHECK: Periodically verify self-checking is running when it should be
+// This is a BACKUP safety net - runs infrequently to catch edge cases
+let healthCheckInterval = null;
+
+function stopHealthCheck() {
+  if (healthCheckInterval) {
+    clearInterval(healthCheckInterval);
+    healthCheckInterval = null;
+  }
+}
+
+function startHealthCheck() {
+  if (healthCheckInterval) return;
+
+  console.log('Polileo: [HEALTH] Starting health check (every 2s)');
+
+  healthCheckInterval = setInterval(() => {
+    // Skip if pole already detected or no thread
+    if (poleAlreadyDetected || !threadId) {
+      stopHealthCheck();
+      return;
+    }
+
+    // Skip if context is invalid (nothing we can do)
+    if (!isExtensionContextValid()) return;
+
+    // Quick DOM check (no logging to avoid spam)
+    const postMessages = document.querySelectorAll('[id^="post_message_"]');
+    const postCount = postMessages.length;
+
+    if (postCount > 1) {
+      console.log('Polileo: [HEALTH] ⚠️ DOM has', postCount, 'posts - pole missed! Cleaning up...');
+      poleAlreadyDetected = true;
+      stopSelfChecking();
+      stopHealthCheck();
+      // Show notification for the missed pole
+      showPoleDetectedNotification(null);
+      return;
+    }
+
+    // If only 1 post and self-check not running (and not in the process of starting)
+    if (postCount === 1 && !selfCheckRunning && !selfCheckInterval) {
+      console.log('Polileo: [HEALTH] ⚠️ Self-check not running! Restarting...');
+      startSelfChecking();
+    }
+  }, 2000); // Check every 2 seconds (lightweight DOM check, doesn't affect network-based self-check)
 }
 
 // Fetch thread and check for pole - with timeout and parallel requests
@@ -1575,6 +1647,9 @@ if (threadId) {
       // START SELF-CHECKING (independent of background)
       startSelfChecking();
 
+      // START HEALTH CHECK (ensures self-checking stays alive)
+      startHealthCheck();
+
       try {
         chrome.storage.local.get(['antifailDefault'], (result) => {
           if (chrome.runtime.lastError) return;
@@ -1600,6 +1675,7 @@ if (threadId) {
 
       window.addEventListener('beforeunload', () => {
         stopSelfChecking();
+        stopHealthCheck();
         safeSendMessage({ action: 'unwatchThread', threadId: threadId });
         // Note: Don't clear activePolileoThread here - user might be going to full editor
       });
@@ -1824,10 +1900,9 @@ function showPoleDetectedNotification(poleAuthor) {
       refreshBtn.addEventListener('click', () => window.location.reload());
       alert.appendChild(refreshBtn);
       console.log('Polileo: Creating FAIL toast (red, with refresh)');
-      // Play pole-detected sound only if this tab is focused
-      if (document.hasFocus()) {
-        safeSendMessage({ action: 'requestPoleDetectedSound' });
-      }
+      // Play pole-detected sound (important alert - play even without focus)
+      console.log('Polileo: Requesting pole-detected sound, hasFocus:', document.hasFocus());
+      safeSendMessage({ action: 'requestPoleDetectedSound' });
     }
 
     document.body.appendChild(alert);
