@@ -2507,12 +2507,40 @@ function safeSendMessage(msg, callback) {
     }
   }
 
+  // AUTO-RECONNECTION for fullEditor module
+  let reconnectInterval = null;
+
+  function startReconnectionLoop(tid) {
+    if (reconnectInterval) return;
+    log('[RECONNECT] Starting reconnection loop');
+
+    reconnectInterval = setInterval(() => {
+      if (isContextValid()) {
+        log('[RECONNECT] ✓ Context restored! Restarting checks...');
+        clearInterval(reconnectInterval);
+        reconnectInterval = null;
+
+        // Check if pole still not detected
+        if (!poleDetectedInFullEditor) {
+          startFullEditorPoleCheck(tid);
+        }
+      }
+    }, 1000);
+  }
+
   function startFullEditorPoleCheck(tid) {
-    if (!isContextValid()) return;
+    if (!isContextValid()) {
+      // Start reconnection instead of giving up
+      startReconnectionLoop(tid);
+      return;
+    }
 
     try {
       chrome.storage.local.get(['timings'], (result) => {
-        if (chrome.runtime.lastError || !isContextValid()) return;
+        if (chrome.runtime.lastError || !isContextValid()) {
+          startReconnectionLoop(tid);
+          return;
+        }
         const interval = result.timings?.threadCheck || 500;
         log('Starting pole check every', interval, 'ms');
 
@@ -2520,6 +2548,7 @@ function safeSendMessage(msg, callback) {
           // GUARDRAIL: Stop if context invalid or pole detected
           if (!isContextValid()) {
             stopChecking();
+            startReconnectionLoop(tid); // Try to reconnect
             return;
           }
           if (poleDetectedInFullEditor) {
@@ -2531,6 +2560,7 @@ function safeSendMessage(msg, callback) {
       });
     } catch (e) {
       log('Error starting check:', e);
+      startReconnectionLoop(tid);
     }
   }
 

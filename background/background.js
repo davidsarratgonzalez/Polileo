@@ -591,6 +591,14 @@ async function checkThreadGuardrail(threadId, tabId) {
 // Start guardrail scan when extension loads
 startGuardrailScan();
 
+// HEALTH CHECK: Ensure guardrail scan is always running
+setInterval(() => {
+  if (!guardrailScanTimer) {
+    console.log('Polileo BG: [HEALTH] ⚠️ Guardrail scan died! Restarting...');
+    startGuardrailScan();
+  }
+}, 10000); // Check every 10 seconds
+
 // Single global polling loop
 function updatePolling() {
   const anyActive = [...windowStates.values()].some(s => s.isActive);
