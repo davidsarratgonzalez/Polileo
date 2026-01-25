@@ -1947,6 +1947,15 @@ function safeSendMessage(msg, callback) {
   const DEBUG = true;
   const log = (...args) => DEBUG && console.log('Polileo [FullEditor]:', ...args);
 
+  // GUARDRAIL: Check if extension context is valid
+  function isContextValid() {
+    try {
+      return chrome.runtime && chrome.runtime.id;
+    } catch {
+      return false;
+    }
+  }
+
   const url = window.location.href;
 
   // PART A: On newthread.php OR newreply.php, mark form submission
@@ -1968,6 +1977,7 @@ function safeSendMessage(msg, callback) {
     }
 
     const markAttempt = () => {
+      if (!isContextValid()) return;
       try {
         chrome.storage.local.set({ fullEditorPostAttempt: Date.now() });
         log('Post attempt marked (' + pageType + ')');
@@ -1995,14 +2005,22 @@ function safeSendMessage(msg, callback) {
 
   log('On ?p= URL, checking for recent post submission');
 
+  // GUARDRAIL: Check context before timeout
+  if (!isContextValid()) {
+    log('Extension context invalid, aborting');
+    return;
+  }
+
   // Wait for page to fully load
   setTimeout(() => {
+    if (!isContextValid()) return;
     try {
       chrome.storage.local.get(['fullEditorPostAttempt', 'lastPostTime'], (result) => {
         if (chrome.runtime.lastError) {
           log('Storage error:', chrome.runtime.lastError);
           return;
         }
+        if (!isContextValid()) return;
 
         const attemptTime = result.fullEditorPostAttempt;
         log('Attempt time from storage:', attemptTime);
@@ -2013,7 +2031,11 @@ function safeSendMessage(msg, callback) {
         }
 
         // CRITICAL: Clear flag FIRST to prevent any re-triggering on F5
-        chrome.storage.local.remove('fullEditorPostAttempt');
+        try {
+          chrome.storage.local.remove('fullEditorPostAttempt');
+        } catch {
+          // Context invalidated
+        }
         log('Flag cleared');
 
         // Check 1: Was the attempt recent? (within 15 seconds)
@@ -2033,7 +2055,11 @@ function safeSendMessage(msg, callback) {
         // All checks passed - trigger cooldown
         const postCount = countPostsInDOM();
         log('✓ Post from full editor detected! Posts:', postCount, '- Starting cooldown...');
-        chrome.storage.local.set({ lastPostTime: Date.now() });
+        try {
+          chrome.storage.local.set({ lastPostTime: Date.now() });
+        } catch {
+          // Context invalidated
+        }
         showCooldownBar();
       });
     } catch (e) {
@@ -2056,6 +2082,15 @@ function safeSendMessage(msg, callback) {
   const DEBUG = true;
   const log = (...args) => DEBUG && console.log('Polileo [FullEditorPole]:', ...args);
 
+  // GUARDRAIL: Check if extension context is valid
+  function isContextValid() {
+    try {
+      return chrome.runtime && chrome.runtime.id;
+    } catch {
+      return false;
+    }
+  }
+
   const url = window.location.href;
 
   // Only run on newreply.php?do=postreply
@@ -2074,6 +2109,12 @@ function safeSendMessage(msg, callback) {
 
   log('On full editor for thread:', threadId);
 
+  // GUARDRAIL: Check context before any chrome API call
+  if (!isContextValid()) {
+    log('Extension context invalid, aborting');
+    return;
+  }
+
   // Check if this thread is the active Polileo thread
   try {
     chrome.storage.local.get(['activePolileoThread', 'antifailDefault'], (result) => {
@@ -2081,6 +2122,8 @@ function safeSendMessage(msg, callback) {
         log('Storage error:', chrome.runtime.lastError);
         return;
       }
+
+      if (!isContextValid()) return;
 
       const activeThread = result.activePolileoThread;
       log('Active Polileo thread:', activeThread);
@@ -2111,106 +2154,143 @@ function safeSendMessage(msg, callback) {
 
   // Get the full editor submit button
   function getFullEditorSubmitBtn() {
-    return document.getElementById('vB_Editor_001_save') ||
-           document.querySelector('input[name="sbutton"][type="submit"]') ||
-           document.querySelector('input[type="submit"][value*="Enviar"]');
+    try {
+      return document.getElementById('vB_Editor_001_save') ||
+             document.querySelector('input[name="sbutton"][type="submit"]') ||
+             document.querySelector('input[type="submit"][value*="Enviar"]');
+    } catch {
+      return null;
+    }
   }
 
   // Inject anti-fail checkbox centered below submit button
   function injectFullEditorAntiFail(defaultEnabled) {
-    const submitBtn = getFullEditorSubmitBtn();
-    if (!submitBtn || document.getElementById('polileo-fulleditor-antifail-container')) return;
+    try {
+      const submitBtn = getFullEditorSubmitBtn();
+      if (!submitBtn || document.getElementById('polileo-fulleditor-antifail-container')) return;
 
-    // Store original state
-    originalBtnState = {
-      value: submitBtn.value,
-      disabled: submitBtn.disabled,
-      style: submitBtn.getAttribute('style') || ''
-    };
+      // Store original state
+      originalBtnState = {
+        value: submitBtn.value,
+        disabled: submitBtn.disabled,
+        style: submitBtn.getAttribute('style') || ''
+      };
 
-    const container = document.createElement('div');
-    container.id = 'polileo-fulleditor-antifail-container';
-    container.style.cssText = `
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 6px;
-      margin-top: 10px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 12px;
-      color: #666;
-    `;
-    container.innerHTML = `
-      <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
-        <input type="checkbox" id="polileo-fulleditor-antifail" ${defaultEnabled ? 'checked' : ''} style="cursor: pointer;">
-        <span>Anti-fail</span>
-      </label>
-    `;
+      const container = document.createElement('div');
+      container.id = 'polileo-fulleditor-antifail-container';
+      container.style.cssText = `
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 6px;
+        margin-top: 10px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 12px;
+        color: #666;
+      `;
+      container.innerHTML = `
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+          <input type="checkbox" id="polileo-fulleditor-antifail" ${defaultEnabled ? 'checked' : ''} style="cursor: pointer;">
+          <span>Anti-fail</span>
+        </label>
+      `;
 
-    // Structure: div[align="left"] > div[flex] > input[submit]
-    // We need to insert AFTER the flex div, as a sibling
-    const buttonFlexDiv = submitBtn.parentElement; // The flex div containing the button
-    const alignLeftDiv = buttonFlexDiv.parentElement; // div align="left"
+      // Structure: div[align="left"] > div[flex] > input[submit]
+      // We need to insert AFTER the flex div, as a sibling
+      const buttonFlexDiv = submitBtn.parentElement;
+      if (!buttonFlexDiv) return;
+      const alignLeftDiv = buttonFlexDiv.parentElement;
+      if (!alignLeftDiv) return;
 
-    // Insert the checkbox div after the button's flex container
-    alignLeftDiv.insertBefore(container, buttonFlexDiv.nextSibling);
+      // Insert the checkbox div after the button's flex container
+      alignLeftDiv.insertBefore(container, buttonFlexDiv.nextSibling);
 
-    // Listen for checkbox changes
-    document.getElementById('polileo-fulleditor-antifail').addEventListener('change', (e) => {
-      if (!e.target.checked && poleDetectedInFullEditor) {
-        // Unblock the button
-        unblockFullEditorSubmit();
-      } else if (e.target.checked && poleDetectedInFullEditor) {
-        // Re-block if pole was detected
-        blockFullEditorSubmit();
+      // Listen for checkbox changes
+      const checkbox = document.getElementById('polileo-fulleditor-antifail');
+      if (checkbox) {
+        checkbox.addEventListener('change', (e) => {
+          if (!e.target.checked && poleDetectedInFullEditor) {
+            unblockFullEditorSubmit();
+          } else if (e.target.checked && poleDetectedInFullEditor) {
+            blockFullEditorSubmit();
+          }
+        });
       }
-    });
 
-    log('Anti-fail checkbox injected');
+      log('Anti-fail checkbox injected');
+    } catch (e) {
+      log('Error injecting anti-fail:', e);
+    }
   }
 
   // Check if anti-fail is enabled
   function isFullEditorAntiFail() {
-    const checkbox = document.getElementById('polileo-fulleditor-antifail');
-    return checkbox ? checkbox.checked : true;
+    try {
+      const checkbox = document.getElementById('polileo-fulleditor-antifail');
+      return checkbox ? checkbox.checked : true;
+    } catch {
+      return true;
+    }
   }
 
   // Block the submit button
   function blockFullEditorSubmit() {
-    const submitBtn = getFullEditorSubmitBtn();
-    if (!submitBtn || !isFullEditorAntiFail()) return;
+    try {
+      const submitBtn = getFullEditorSubmitBtn();
+      if (!submitBtn || !isFullEditorAntiFail()) return;
 
-    submitBtn.disabled = true;
-    submitBtn.value = 'BLOQUEADO - YA HAY POLE';
-    submitBtn.style.background = '#666';
-    submitBtn.style.color = '#fff';
-    submitBtn.style.border = 'none';
-    submitBtn.style.cursor = 'not-allowed';
-    log('Submit button blocked');
+      submitBtn.disabled = true;
+      submitBtn.value = 'BLOQUEADO - YA HAY POLE';
+      submitBtn.style.background = '#666';
+      submitBtn.style.color = '#fff';
+      submitBtn.style.border = 'none';
+      submitBtn.style.cursor = 'not-allowed';
+      log('Submit button blocked');
+    } catch (e) {
+      log('Error blocking submit:', e);
+    }
   }
 
   // Unblock the submit button
   function unblockFullEditorSubmit() {
-    const submitBtn = getFullEditorSubmitBtn();
-    if (!submitBtn || !originalBtnState) return;
+    try {
+      const submitBtn = getFullEditorSubmitBtn();
+      if (!submitBtn || !originalBtnState) return;
 
-    submitBtn.disabled = originalBtnState.disabled;
-    submitBtn.value = originalBtnState.value;
-    submitBtn.setAttribute('style', originalBtnState.style);
-    log('Submit button unblocked');
+      submitBtn.disabled = originalBtnState.disabled;
+      submitBtn.value = originalBtnState.value;
+      submitBtn.setAttribute('style', originalBtnState.style);
+      log('Submit button unblocked');
+    } catch (e) {
+      log('Error unblocking submit:', e);
+    }
+  }
+
+  // GUARDRAIL: Stop checking and clean up
+  function stopChecking() {
+    if (checkInterval) {
+      clearInterval(checkInterval);
+      checkInterval = null;
+    }
   }
 
   function startFullEditorPoleCheck(tid) {
-    // Get check interval from settings
+    if (!isContextValid()) return;
+
     try {
       chrome.storage.local.get(['timings'], (result) => {
-        if (chrome.runtime.lastError) return;
+        if (chrome.runtime.lastError || !isContextValid()) return;
         const interval = result.timings?.threadCheck || 500;
         log('Starting pole check every', interval, 'ms');
 
         checkInterval = setInterval(() => {
+          // GUARDRAIL: Stop if context invalid or pole detected
+          if (!isContextValid()) {
+            stopChecking();
+            return;
+          }
           if (poleDetectedInFullEditor) {
-            clearInterval(checkInterval);
+            stopChecking();
             return;
           }
           checkForPole(tid);
@@ -2222,7 +2302,7 @@ function safeSendMessage(msg, callback) {
   }
 
   async function checkForPole(tid) {
-    if (poleDetectedInFullEditor) return;
+    if (poleDetectedInFullEditor || !isContextValid()) return;
 
     try {
       const resp = await fetch(
@@ -2238,7 +2318,7 @@ function safeSendMessage(msg, callback) {
 
       if (postCount > 1 && !poleDetectedInFullEditor) {
         poleDetectedInFullEditor = true;
-        clearInterval(checkInterval);
+        stopChecking();
 
         // Extract pole author
         const poleAuthor = extractAuthor(html, postMatches);
@@ -2249,93 +2329,107 @@ function safeSendMessage(msg, callback) {
 
         showPoleAlert(poleAuthor);
 
-        // Play sound
-        try {
-          chrome.runtime.sendMessage({ action: 'requestPoleDetectedSound' });
-        } catch {}
+        // Play sound (with guardrail)
+        if (isContextValid()) {
+          try {
+            chrome.runtime.sendMessage({ action: 'requestPoleDetectedSound' });
+          } catch {
+            // Extension context invalidated
+          }
+        }
       }
     } catch (e) {
       // Network error, will retry
+      log('Check error:', e.message);
     }
   }
 
   function extractAuthor(html, postMatches) {
-    if (postMatches && postMatches.length >= 2) {
-      const secondPostStart = html.indexOf(postMatches[1]);
-      const beforeSecondPost = html.substring(Math.max(0, secondPostStart - 3000), secondPostStart);
-      const memberMatch = beforeSecondPost.match(/member\.php\?u=\d+[^>]*>([^<]+)</);
-      if (memberMatch) return memberMatch[1].trim();
+    try {
+      if (postMatches && postMatches.length >= 2) {
+        const secondPostStart = html.indexOf(postMatches[1]);
+        const beforeSecondPost = html.substring(Math.max(0, secondPostStart - 3000), secondPostStart);
+        const memberMatch = beforeSecondPost.match(/member\.php\?u=\d+[^>]*>([^<]+)</);
+        if (memberMatch) return memberMatch[1].trim();
+      }
+    } catch {
+      // Ignore extraction errors
     }
     return null;
   }
 
   function showPoleAlert(author) {
-    // Remove existing if any
-    const existing = document.getElementById('polileo-fulleditor-alert');
-    if (existing) existing.remove();
+    try {
+      // Remove existing if any
+      const existing = document.getElementById('polileo-fulleditor-alert');
+      if (existing) existing.remove();
 
-    const alert = document.createElement('div');
-    alert.id = 'polileo-fulleditor-alert';
-    alert.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 99999;
-      background: #f44336;
-      color: white;
-      padding: 15px 20px;
-      border-radius: 8px;
-      box-shadow: 0 4px 20px rgba(244, 67, 54, 0.4);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 14px;
-      font-weight: 500;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      animation: slideInFromRight 0.3s ease;
-    `;
-
-    const text = author ? `¡Pole robada por ${author}!` : '¡Alguien ha hecho la pole!';
-    alert.innerHTML = `
-      <span>${text}</span>
-      <button id="polileo-fulleditor-goback" style="
-        background: #3b82f6;
-        border: none;
+      const alertEl = document.createElement('div');
+      alertEl.id = 'polileo-fulleditor-alert';
+      alertEl.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 99999;
+        background: #f44336;
         color: white;
-        padding: 6px 12px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 12px;
+        padding: 15px 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(244, 67, 54, 0.4);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 14px;
         font-weight: 500;
-      ">Volver al hilo</button>
-    `;
-
-    // Add animation keyframes
-    if (!document.getElementById('polileo-fulleditor-styles')) {
-      const style = document.createElement('style');
-      style.id = 'polileo-fulleditor-styles';
-      style.textContent = `
-        @keyframes slideInFromRight {
-          from { opacity: 0; transform: translateX(100px); }
-          to { opacity: 1; transform: translateX(0); }
-        }
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        animation: slideInFromRight 0.3s ease;
       `;
-      document.head.appendChild(style);
+
+      const text = author ? `¡Pole robada por ${author}!` : '¡Alguien ha hecho la pole!';
+      alertEl.innerHTML = `
+        <span>${text}</span>
+        <button id="polileo-fulleditor-goback" style="
+          background: #3b82f6;
+          border: none;
+          color: white;
+          padding: 6px 12px;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 500;
+        ">Volver al hilo</button>
+      `;
+
+      // Add animation keyframes
+      if (!document.getElementById('polileo-fulleditor-styles')) {
+        const style = document.createElement('style');
+        style.id = 'polileo-fulleditor-styles';
+        style.textContent = `
+          @keyframes slideInFromRight {
+            from { opacity: 0; transform: translateX(100px); }
+            to { opacity: 1; transform: translateX(0); }
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      document.body.appendChild(alertEl);
+
+      // Button to go back to thread
+      const gobackBtn = document.getElementById('polileo-fulleditor-goback');
+      if (gobackBtn) {
+        gobackBtn.addEventListener('click', () => {
+          window.location.href = `${window.location.origin}/foro/showthread.php?t=${threadId}`;
+        });
+      }
+
+      log('Alert shown');
+    } catch (e) {
+      log('Error showing alert:', e);
     }
-
-    document.body.appendChild(alert);
-
-    // Button to go back to thread
-    document.getElementById('polileo-fulleditor-goback').addEventListener('click', () => {
-      window.location.href = `${window.location.origin}/foro/showthread.php?t=${threadId}`;
-    });
-
-    log('Alert shown');
   }
 
   // Cleanup on page unload
-  window.addEventListener('beforeunload', () => {
-    if (checkInterval) clearInterval(checkInterval);
-  });
+  window.addEventListener('beforeunload', stopChecking);
 })();
 
