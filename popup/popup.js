@@ -47,7 +47,9 @@ document.addEventListener('DOMContentLoaded', () => {
     togglePolileo: isMac
       ? { key: 'p', ctrl: false, alt: false, meta: true, shift: true }
       : { key: 'p', ctrl: false, alt: true, meta: false, shift: true },
-    toggleLock: { key: 'Escape', ctrl: false, alt: false, meta: false, shift: false },
+    toggleLock: isMac
+      ? { key: 'l', ctrl: false, alt: false, meta: true, shift: true }
+      : { key: 'l', ctrl: false, alt: true, meta: false, shift: true },
     toggleMute: isMac
       ? { key: 'm', ctrl: false, alt: false, meta: true, shift: true }
       : { key: 'm', ctrl: false, alt: true, meta: false, shift: true },

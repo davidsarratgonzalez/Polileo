@@ -196,7 +196,9 @@ function updateMuteButton(isMuted) {
 const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 
 const defaultHotkeys = {
-  toggleLock: { key: 'Escape', ctrl: false, alt: false, meta: false, shift: false },
+  toggleLock: isMac
+    ? { key: 'l', ctrl: false, alt: false, meta: true, shift: true }
+    : { key: 'l', ctrl: false, alt: true, meta: false, shift: true },
   toggleMute: isMac
     ? { key: 'm', ctrl: false, alt: false, meta: true, shift: true }
     : { key: 'm', ctrl: false, alt: true, meta: false, shift: true },
