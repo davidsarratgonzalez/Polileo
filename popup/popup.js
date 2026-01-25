@@ -77,7 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Load settings
   chrome.storage.local.get(['globalMute', 'soundEnabled', 'soundSuccess', 'soundFail', 'soundDetected', 'soundOnlyWhenActive', 'antifailDefault', 'autoLockDisabled', 'hotkeys', 'timings'], (result) => {
-    globalMuteEl.checked = result.globalMute || false; // Default: not muted
+    globalMuteEl.checked = !result.globalMute; // Inverted: checked = sound ON
     soundEnabledEl.checked = result.soundEnabled !== false; // Default: enabled
     soundSuccessEl.checked = result.soundSuccess !== false; // Default: enabled
     soundDetectedEl.checked = result.soundDetected !== false; // Default: enabled
@@ -104,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Save settings on change
   globalMuteEl.addEventListener('change', () => {
-    chrome.storage.local.set({ globalMute: globalMuteEl.checked });
+    chrome.storage.local.set({ globalMute: !globalMuteEl.checked }); // Inverted: checked = sound ON
   });
 
   soundEnabledEl.addEventListener('change', () => {
