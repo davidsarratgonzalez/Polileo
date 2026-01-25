@@ -439,9 +439,14 @@ function injectIframeHotkeyListener() {
 // Try to inject on load and observe for iframe creation
 injectIframeHotkeyListener();
 
-// Re-inject when iframe might be created/recreated
+// Re-inject when iframe might be created/recreated (throttled)
+let iframeObserverTimeout = null;
 const iframeObserver = new MutationObserver(() => {
-  injectIframeHotkeyListener();
+  if (iframeObserverTimeout) return;
+  iframeObserverTimeout = setTimeout(() => {
+    iframeObserverTimeout = null;
+    injectIframeHotkeyListener();
+  }, 300);
 });
 iframeObserver.observe(document.body, { childList: true, subtree: true });
 
@@ -1014,9 +1019,15 @@ function handleDeleteHotkey(e) {
 document.addEventListener('keydown', handleDeleteHotkey);
 
 // Also inject into editor iframe so hotkey works while typing
+let deleteHotkeyInjected = false;
+let deleteHotkeyIframeRef = null;
+
 function injectDeleteHotkeyIntoIframe() {
   const iframe = getEditorIframe();
   if (!iframe) return;
+
+  // Skip if already injected into this exact iframe
+  if (deleteHotkeyInjected && deleteHotkeyIframeRef === iframe) return;
 
   try {
     const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
@@ -1025,16 +1036,24 @@ function injectDeleteHotkeyIntoIframe() {
     // Remove old listener if exists, then add fresh one
     iframeDoc.removeEventListener('keydown', handleDeleteHotkey);
     iframeDoc.addEventListener('keydown', handleDeleteHotkey);
+    deleteHotkeyInjected = true;
+    deleteHotkeyIframeRef = iframe;
     console.log('Polileo: Delete hotkey injected into iframe');
   } catch {
     // Cross-origin iframe
   }
 }
 
-// Inject on load and when iframe might be created
+// Inject on load and when iframe might be created (throttled)
 injectDeleteHotkeyIntoIframe();
+let deleteHotkeyObserverTimeout = null;
 const deleteHotkeyObserver = new MutationObserver(() => {
-  injectDeleteHotkeyIntoIframe();
+  // Throttle: only check once every 500ms
+  if (deleteHotkeyObserverTimeout) return;
+  deleteHotkeyObserverTimeout = setTimeout(() => {
+    deleteHotkeyObserverTimeout = null;
+    injectDeleteHotkeyIntoIframe();
+  }, 500);
 });
 deleteHotkeyObserver.observe(document.body, { childList: true, subtree: true });
 

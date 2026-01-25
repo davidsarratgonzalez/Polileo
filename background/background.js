@@ -5,6 +5,18 @@ const MAX_OPENED_THREADS = 100;
 const OFFSCREEN_DOCUMENT_PATH = 'offscreen/offscreen.html';
 
 // ============================================
+// CRASH PREVENTION: Catch unhandled errors
+// ============================================
+self.addEventListener('error', (event) => {
+  console.error('Polileo BG: UNHANDLED ERROR:', event.error?.message || event.message);
+});
+
+self.addEventListener('unhandledrejection', (event) => {
+  console.error('Polileo BG: UNHANDLED REJECTION:', event.reason?.message || event.reason);
+  event.preventDefault(); // Prevent crash
+});
+
+// ============================================
 // Offscreen Document for Audio Playback
 // ============================================
 
@@ -134,17 +146,21 @@ chrome.storage.local.get(['timings'], (result) => {
 
 // Listen for timing changes
 chrome.storage.onChanged.addListener((changes) => {
-  if (changes.timings) {
-    const newTimings = changes.timings.newValue || DEFAULT_TIMINGS;
-    POLL_INTERVAL = newTimings.pollInterval || DEFAULT_TIMINGS.pollInterval;
-    THREAD_CHECK_INTERVAL = newTimings.threadCheck || newTimings.threadWatchFast || DEFAULT_TIMINGS.threadCheck;
-    console.log('Polileo BG: Timings updated - poll:', POLL_INTERVAL, 'threadCheck:', THREAD_CHECK_INTERVAL);
+  try {
+    if (changes.timings) {
+      const newTimings = changes.timings.newValue || DEFAULT_TIMINGS;
+      POLL_INTERVAL = newTimings.pollInterval || DEFAULT_TIMINGS.pollInterval;
+      THREAD_CHECK_INTERVAL = newTimings.threadCheck || newTimings.threadWatchFast || DEFAULT_TIMINGS.threadCheck;
+      console.log('Polileo BG: Timings updated - poll:', POLL_INTERVAL, 'threadCheck:', THREAD_CHECK_INTERVAL);
 
-    // Restart timer with new value if watching
-    if (watchedThreads.size > 0) {
-      stopThreadWatching();
-      startThreadWatching();
+      // Restart timer with new value if watching
+      if (watchedThreads.size > 0) {
+        stopThreadWatching();
+        startThreadWatching();
+      }
     }
+  } catch (e) {
+    console.log('Polileo BG: Error handling storage change:', e.message);
   }
 });
 
@@ -336,17 +352,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === 'requestSuccessSound') {
     // Content script requesting success sound (pole conseguida)
     const windowId = sender.tab?.windowId;
-    playSuccessSound(windowId).then(() => sendResponse({ success: true }));
+    playSuccessSound(windowId)
+      .then(() => sendResponse({ success: true }))
+      .catch((e) => {
+        console.log('Polileo BG: Error in requestSuccessSound:', e.message);
+        sendResponse({ success: false });
+      });
     return true;
   } else if (msg.action === 'requestNotPoleSound') {
     // Content script requesting not-pole sound (your post wasn't pole)
     const windowId = sender.tab?.windowId;
-    playNotPoleSound(windowId).then(() => sendResponse({ success: true }));
+    playNotPoleSound(windowId)
+      .then(() => sendResponse({ success: true }))
+      .catch((e) => {
+        console.log('Polileo BG: Error in requestNotPoleSound:', e.message);
+        sendResponse({ success: false });
+      });
     return true;
   } else if (msg.action === 'requestPoleDetectedSound') {
     // Content script requesting pole-detected sound (someone else got pole)
     const windowId = sender.tab?.windowId;
-    playPoleDetectedSound(windowId).then(() => sendResponse({ success: true }));
+    playPoleDetectedSound(windowId)
+      .then(() => sendResponse({ success: true }))
+      .catch((e) => {
+        console.log('Polileo BG: Error in requestPoleDetectedSound:', e.message);
+        sendResponse({ success: false });
+      });
     return true;
   }
 });
