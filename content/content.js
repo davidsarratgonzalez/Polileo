@@ -2135,7 +2135,7 @@ function safeSendMessage(msg, callback) {
       justify-content: center;
       align-items: center;
       gap: 6px;
-      margin-top: 8px;
+      margin-top: 10px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 12px;
       color: #666;
@@ -2147,8 +2147,13 @@ function safeSendMessage(msg, callback) {
       </label>
     `;
 
-    // Insert after submit button
-    submitBtn.parentNode.insertBefore(container, submitBtn.nextSibling);
+    // Structure: div[align="left"] > div[flex] > input[submit]
+    // We need to insert AFTER the flex div, as a sibling
+    const buttonFlexDiv = submitBtn.parentElement; // The flex div containing the button
+    const alignLeftDiv = buttonFlexDiv.parentElement; // div align="left"
+
+    // Insert the checkbox div after the button's flex container
+    alignLeftDiv.insertBefore(container, buttonFlexDiv.nextSibling);
 
     // Listen for checkbox changes
     document.getElementById('polileo-fulleditor-antifail').addEventListener('change', (e) => {
