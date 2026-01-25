@@ -1469,8 +1469,9 @@ function startSelfChecking() {
 
       selfCheckInterval = setInterval(() => {
         if (!isExtensionContextValid()) {
-          console.log('Polileo: [SELF-CHECK] Context invalidated, stopping');
+          console.log('Polileo: [SELF-CHECK] Context invalidated, starting reconnection watcher');
           stopSelfChecking();
+          startReconnectionWatcher(); // Try to auto-recover
           return;
         }
         if (poleAlreadyDetected) {
@@ -1519,8 +1520,14 @@ function startHealthCheck() {
       return;
     }
 
-    // Skip if context is invalid (nothing we can do)
-    if (!isExtensionContextValid()) return;
+    // If context is invalid, start reconnection watcher
+    if (!isExtensionContextValid()) {
+      if (!reconnectionInterval) {
+        console.log('Polileo: [HEALTH] Context invalid, starting reconnection watcher');
+        startReconnectionWatcher();
+      }
+      return;
+    }
 
     // Quick DOM check (no logging to avoid spam)
     const postMessages = document.querySelectorAll('[id^="post_message_"]');
@@ -1542,6 +1549,81 @@ function startHealthCheck() {
       startSelfChecking();
     }
   }, 2000); // Check every 2 seconds (lightweight DOM check, doesn't affect network-based self-check)
+}
+
+// ============================================
+// AUTO-RECONNECTION: Recover from extension crashes
+// ============================================
+let reconnectionInterval = null;
+let wasDisconnected = false;
+
+function startReconnectionWatcher() {
+  if (reconnectionInterval) return;
+
+  console.log('Polileo: [RECONNECT] Starting reconnection watcher (every 1s)');
+  wasDisconnected = true;
+
+  reconnectionInterval = setInterval(() => {
+    // Check if context is valid again
+    if (isExtensionContextValid()) {
+      console.log('Polileo: [RECONNECT] ✓ Context restored! Reconnecting...');
+      clearInterval(reconnectionInterval);
+      reconnectionInterval = null;
+
+      // Re-initialize if we were tracking a thread
+      if (threadId && !poleAlreadyDetected) {
+        console.log('Polileo: [RECONNECT] Re-registering thread', threadId);
+
+        // Re-register with background
+        try {
+          const postCount = countPostsInDOM();
+          if (postCount === 1) {
+            // Still no pole, re-register
+            chrome.runtime.sendMessage({
+              action: 'watchThread',
+              threadId: threadId,
+              initialCount: postCount
+            }, () => {
+              if (chrome.runtime.lastError) {
+                console.log('Polileo: [RECONNECT] Failed to re-register:', chrome.runtime.lastError.message);
+                // Try again later
+                setTimeout(startReconnectionWatcher, 2000);
+                return;
+              }
+              console.log('Polileo: [RECONNECT] ✓ Thread re-registered successfully');
+
+              // Restart self-checking
+              if (!selfCheckRunning && !selfCheckInterval) {
+                startSelfChecking();
+              }
+              // Restart health check
+              if (!healthCheckInterval) {
+                startHealthCheck();
+              }
+              wasDisconnected = false;
+            });
+          } else {
+            console.log('Polileo: [RECONNECT] Pole already taken, no need to re-register');
+            poleAlreadyDetected = true;
+            wasDisconnected = false;
+          }
+        } catch (e) {
+          console.log('Polileo: [RECONNECT] Error during reconnection:', e.message);
+          // Try again later
+          setTimeout(startReconnectionWatcher, 2000);
+        }
+      } else {
+        wasDisconnected = false;
+      }
+    }
+  }, 1000);
+}
+
+function stopReconnectionWatcher() {
+  if (reconnectionInterval) {
+    clearInterval(reconnectionInterval);
+    reconnectionInterval = null;
+  }
 }
 
 // Fetch thread and check for pole - with timeout and parallel requests
@@ -2028,6 +2110,19 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     const tid = getThreadId();
     if (tid && !poleAlreadyDetected) {
+      // If context was invalid, try to reconnect now that tab is visible
+      if (!isExtensionContextValid()) {
+        console.log('Polileo: [VISIBILITY] Tab visible but context invalid - starting reconnection');
+        startReconnectionWatcher();
+        return;
+      }
+
+      // If we were disconnected and are now reconnected, stop the watcher
+      if (reconnectionInterval && isExtensionContextValid()) {
+        console.log('Polileo: [VISIBILITY] Context restored on visibility');
+        stopReconnectionWatcher();
+      }
+
       // FIRST: Check current DOM state - if there are already replies, DON'T start checking
       const currentPostCount = countPostsInDOM();
       console.log('Polileo: [VISIBILITY] Tab visible - DOM has', currentPostCount, 'posts');
