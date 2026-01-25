@@ -532,11 +532,39 @@ function updatePolling() {
     console.log('Polileo BG: Starting forum polling');
     chrome.alarms.create(ALARM_NAME, { periodInMinutes: 0.33 });
     poll();
+    startPollHealthCheck();
   } else if (!anyActive && pollTimer) {
     console.log('Polileo BG: Stopping forum polling');
     chrome.alarms.clear(ALARM_NAME);
     clearTimeout(pollTimer);
     pollTimer = null;
+    stopPollHealthCheck();
+  }
+}
+
+// HEALTH CHECK: Ensure polling is running when it should be
+let pollHealthCheckTimer = null;
+
+function startPollHealthCheck() {
+  if (pollHealthCheckTimer) return;
+  console.log('Polileo BG: Starting poll health check');
+  pollHealthCheckTimer = setInterval(() => {
+    const anyActive = [...windowStates.values()].some(s => s.isActive);
+    if (anyActive && !pollTimer) {
+      console.log('Polileo BG: [HEALTH] ⚠️ Polling should be running but is not! Restarting...');
+      poll();
+    } else if (!anyActive && pollHealthCheckTimer) {
+      // No active windows, stop health check
+      stopPollHealthCheck();
+    }
+  }, 5000); // Check every 5 seconds
+}
+
+function stopPollHealthCheck() {
+  if (pollHealthCheckTimer) {
+    clearInterval(pollHealthCheckTimer);
+    pollHealthCheckTimer = null;
+    console.log('Polileo BG: Poll health check stopped');
   }
 }
 
@@ -560,7 +588,13 @@ async function poll() {
       console.log('Polileo BG: Found', poles.length, 'potential poles');
 
       // Get blacklist from storage
-      const { titleBlacklist = [] } = await chrome.storage.local.get(['titleBlacklist']);
+      let titleBlacklist = [];
+      try {
+        const result = await chrome.storage.local.get(['titleBlacklist']);
+        titleBlacklist = result.titleBlacklist || [];
+      } catch {
+        // Storage error, continue without blacklist
+      }
 
       // Open poles in each active window (if not already opened in that window)
       for (const [windowId, state] of activeWindows) {
@@ -608,14 +642,14 @@ async function poll() {
       saveStates();
     }
   } catch (e) {
-    console.log('Polileo BG: Network error during poll:', e);
-  }
-
-  // Schedule next poll
-  if ([...windowStates.values()].some(s => s.isActive)) {
-    pollTimer = setTimeout(poll, POLL_INTERVAL);
-  } else {
-    pollTimer = null;
+    console.log('Polileo BG: Error during poll:', e.message);
+  } finally {
+    // ALWAYS schedule next poll if there are active windows (even after errors)
+    if ([...windowStates.values()].some(s => s.isActive)) {
+      pollTimer = setTimeout(poll, POLL_INTERVAL);
+    } else {
+      pollTimer = null;
+    }
   }
 }
 

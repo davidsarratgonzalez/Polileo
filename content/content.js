@@ -1404,6 +1404,7 @@ let selfCheckRunning = false;
 
 // Start self-checking for pole detection (independent of background script)
 function startSelfChecking() {
+  // GUARD: Prevent duplicate starts (check ALL flags atomically)
   if (selfCheckInterval || selfCheckRunning) {
     console.log('Polileo: [SELF-CHECK] Already running, skipping start');
     return;
@@ -1417,25 +1418,35 @@ function startSelfChecking() {
     return;
   }
 
+  // SET FLAG IMMEDIATELY to prevent race condition during async operation
+  selfCheckRunning = true;
+
   // Get check interval from settings
   try {
     chrome.storage.local.get(['timings'], (result) => {
+      // If we were stopped during the async gap, abort
+      if (!selfCheckRunning) {
+        console.log('Polileo: [SELF-CHECK] Stopped during setup, aborting');
+        return;
+      }
       if (chrome.runtime.lastError) {
         console.log('Polileo: [SELF-CHECK] Storage error:', chrome.runtime.lastError);
+        selfCheckRunning = false; // Reset flag on error
         return;
       }
       if (!isExtensionContextValid()) {
         console.log('Polileo: [SELF-CHECK] Context became invalid during setup');
+        selfCheckRunning = false;
         return;
       }
       if (poleAlreadyDetected) {
         console.log('Polileo: [SELF-CHECK] Pole detected during setup, aborting');
+        selfCheckRunning = false;
         return;
       }
 
       const checkInterval = result.timings?.threadCheck || 500;
       console.log('Polileo: [SELF-CHECK] ✓ Starting interval every', checkInterval, 'ms');
-      selfCheckRunning = true;
 
       selfCheckInterval = setInterval(() => {
         if (!isExtensionContextValid()) {
@@ -1453,6 +1464,7 @@ function startSelfChecking() {
     });
   } catch (e) {
     console.log('Polileo: [SELF-CHECK] Exception during start:', e.message);
+    selfCheckRunning = false; // Reset flag on exception
   }
 }
 
