@@ -52,7 +52,8 @@ async function shouldPlaySound(windowId) {
 
 async function playNotificationSound() {
   try {
-    const { soundEnabled } = await chrome.storage.local.get(['soundEnabled']);
+    const { globalMute, soundEnabled } = await chrome.storage.local.get(['globalMute', 'soundEnabled']);
+    if (globalMute) return; // Master mute
     if (soundEnabled === false) return;
     await ensureOffscreenDocument();
     await chrome.runtime.sendMessage({ action: 'playNewThreadSound' });
@@ -63,8 +64,9 @@ async function playNotificationSound() {
 
 async function playSuccessSound(windowId) {
   try {
-    const { soundSuccess } = await chrome.storage.local.get(['soundSuccess']);
-    console.log('Polileo BG: playSuccessSound - soundSuccess:', soundSuccess, 'windowId:', windowId);
+    const { globalMute, soundSuccess } = await chrome.storage.local.get(['globalMute', 'soundSuccess']);
+    console.log('Polileo BG: playSuccessSound - globalMute:', globalMute, 'soundSuccess:', soundSuccess, 'windowId:', windowId);
+    if (globalMute) return; // Master mute
     if (soundSuccess === false) return;
     if (windowId && !(await shouldPlaySound(windowId))) return;
     await ensureOffscreenDocument();
@@ -77,8 +79,9 @@ async function playSuccessSound(windowId) {
 // Tu post no fue pole (sad, you tried and failed)
 async function playNotPoleSound(windowId) {
   try {
-    const { soundFail } = await chrome.storage.local.get(['soundFail']);
-    console.log('Polileo BG: playNotPoleSound - soundFail:', soundFail, 'windowId:', windowId);
+    const { globalMute, soundFail } = await chrome.storage.local.get(['globalMute', 'soundFail']);
+    console.log('Polileo BG: playNotPoleSound - globalMute:', globalMute, 'soundFail:', soundFail, 'windowId:', windowId);
+    if (globalMute) return; // Master mute
     if (soundFail !== true) {
       console.log('Polileo BG: soundFail not enabled, skipping');
       return; // Default: disabled
@@ -94,8 +97,9 @@ async function playNotPoleSound(windowId) {
 // Alguien más hizo la pole (informational detection)
 async function playPoleDetectedSound(windowId) {
   try {
-    const { soundDetected } = await chrome.storage.local.get(['soundDetected']);
-    console.log('Polileo BG: playPoleDetectedSound - soundDetected:', soundDetected, 'windowId:', windowId);
+    const { globalMute, soundDetected } = await chrome.storage.local.get(['globalMute', 'soundDetected']);
+    console.log('Polileo BG: playPoleDetectedSound - globalMute:', globalMute, 'soundDetected:', soundDetected, 'windowId:', windowId);
+    if (globalMute) return; // Master mute
     if (soundDetected === false) return;
     if (windowId && !(await shouldPlaySound(windowId))) return;
     await ensureOffscreenDocument();

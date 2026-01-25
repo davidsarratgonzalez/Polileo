@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const toggleBtn = document.getElementById('toggleBtn');
   const statusEl = document.getElementById('status');
   const logoEl = document.querySelector('.logo');
+  const globalMuteEl = document.getElementById('globalMute');
   const soundEnabledEl = document.getElementById('soundEnabled');
   const soundSuccessEl = document.getElementById('soundSuccess');
   const soundFailEl = document.getElementById('soundFail');
@@ -11,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const autoLockDisabledEl = document.getElementById('autoLockDisabled');
   const hotkeyToggleEl = document.getElementById('hotkeyToggle');
   const hotkeyLockEl = document.getElementById('hotkeyLock');
+  const hotkeyMuteEl = document.getElementById('hotkeyMute');
   const hotkeyFocusEl = document.getElementById('hotkeyFocus');
   const hotkeySubmitEl = document.getElementById('hotkeySubmit');
   const hotkeyDeleteEl = document.getElementById('hotkeyDelete');
@@ -46,6 +48,9 @@ document.addEventListener('DOMContentLoaded', () => {
       ? { key: 'p', ctrl: false, alt: false, meta: true, shift: true }
       : { key: 'p', ctrl: false, alt: true, meta: false, shift: true },
     toggleLock: { key: 'Escape', ctrl: false, alt: false, meta: false, shift: false },
+    toggleMute: isMac
+      ? { key: 'm', ctrl: false, alt: false, meta: true, shift: true }
+      : { key: 'm', ctrl: false, alt: true, meta: false, shift: true },
     focusReply: { key: 'Tab', ctrl: false, alt: false, meta: false, shift: false },
     submitReply: isMac
       ? { key: 's', ctrl: false, alt: false, meta: true, shift: false }
@@ -71,7 +76,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load settings
-  chrome.storage.local.get(['soundEnabled', 'soundSuccess', 'soundFail', 'soundDetected', 'soundOnlyWhenActive', 'antifailDefault', 'autoLockDisabled', 'hotkeys', 'timings'], (result) => {
+  chrome.storage.local.get(['globalMute', 'soundEnabled', 'soundSuccess', 'soundFail', 'soundDetected', 'soundOnlyWhenActive', 'antifailDefault', 'autoLockDisabled', 'hotkeys', 'timings'], (result) => {
+    globalMuteEl.checked = result.globalMute || false; // Default: not muted
     soundEnabledEl.checked = result.soundEnabled !== false; // Default: enabled
     soundSuccessEl.checked = result.soundSuccess !== false; // Default: enabled
     soundDetectedEl.checked = result.soundDetected !== false; // Default: enabled
@@ -83,6 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const hotkeys = result.hotkeys || defaultHotkeys;
     updateHotkeyDisplay(hotkeyToggleEl, hotkeys.togglePolileo || defaultHotkeys.togglePolileo);
     updateHotkeyDisplay(hotkeyLockEl, hotkeys.toggleLock || defaultHotkeys.toggleLock);
+    updateHotkeyDisplay(hotkeyMuteEl, hotkeys.toggleMute || defaultHotkeys.toggleMute);
     updateHotkeyDisplay(hotkeyFocusEl, hotkeys.focusReply || defaultHotkeys.focusReply);
     updateHotkeyDisplay(hotkeySubmitEl, hotkeys.submitReply || defaultHotkeys.submitReply);
     updateHotkeyDisplay(hotkeyDeleteEl, hotkeys.deletePost || defaultHotkeys.deletePost);
@@ -96,6 +103,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Save settings on change
+  globalMuteEl.addEventListener('change', () => {
+    chrome.storage.local.set({ globalMute: globalMuteEl.checked });
+  });
+
   soundEnabledEl.addEventListener('change', () => {
     chrome.storage.local.set({ soundEnabled: soundEnabledEl.checked });
   });
@@ -254,6 +265,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Hotkey recording
   hotkeyToggleEl.addEventListener('click', () => startRecording(hotkeyToggleEl));
   hotkeyLockEl.addEventListener('click', () => startRecording(hotkeyLockEl));
+  hotkeyMuteEl.addEventListener('click', () => startRecording(hotkeyMuteEl));
   hotkeyFocusEl.addEventListener('click', () => startRecording(hotkeyFocusEl));
   hotkeySubmitEl.addEventListener('click', () => startRecording(hotkeySubmitEl));
   hotkeyDeleteEl.addEventListener('click', () => startRecording(hotkeyDeleteEl));

@@ -50,6 +50,10 @@
           <span class="hotkey-label">Borrar fail</span>
           <button class="hotkey-input" id="hotkeyDelete" data-key="deletePost">-</button>
         </div>
+        <div class="hotkey-item">
+          <span class="hotkey-label">Mutear/desmutear</span>
+          <button class="hotkey-input" id="hotkeyMute" data-key="toggleMute">-</button>
+        </div>
       </div>
     </div>
 
@@ -58,6 +62,12 @@
         <span class="toggle-icon">▶</span> Audio
       </button>
       <div class="advanced-content" id="audioContent">
+        <div class="setting-item master-mute">
+          <label for="globalMute">
+            <input type="checkbox" id="globalMute">
+            <span>Silenciar todo</span>
+          </label>
+        </div>
         <div class="setting-item">
           <label for="soundEnabled">
             <input type="checkbox" id="soundEnabled" checked>

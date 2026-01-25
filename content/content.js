@@ -18,8 +18,15 @@ const lockBtn = document.createElement('button');
 lockBtn.id = 'polileo-lock-btn';
 document.body.appendChild(lockBtn);
 
+// Create mute button
+const muteBtn = document.createElement('button');
+muteBtn.id = 'polileo-mute-btn';
+document.body.appendChild(muteBtn);
+
 const lockIconSvg = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>`;
 const unlockIconSvg = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 17c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm6-9h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6h1.9c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm0 12H6V10h12v10z"/></svg>`;
+const speakerOnSvg = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>`;
+const speakerOffSvg = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>`;
 
 // Detect if this page was opened by Polileo
 const isPolileoPage = new URL(window.location.href).searchParams.has('polileo');
@@ -121,6 +128,68 @@ function updateLockButton(isLocked) {
 }
 
 // ============================================
+// Mute button (global mute)
+// ============================================
+
+// Initialize mute state
+function initMuteState() {
+  try {
+    chrome.storage.local.get(['globalMute'], (result) => {
+      if (chrome.runtime.lastError) return;
+      updateMuteButton(result.globalMute || false);
+    });
+  } catch {
+    // Extension context invalidated
+  }
+}
+initMuteState();
+
+// Toggle mute on click
+muteBtn.addEventListener('click', () => {
+  try {
+    chrome.storage.local.get(['globalMute'], (result) => {
+      if (chrome.runtime.lastError) return;
+      const newState = !(result.globalMute || false);
+      chrome.storage.local.set({ globalMute: newState });
+      updateMuteButton(newState);
+    });
+  } catch {
+    // Extension context invalidated
+  }
+});
+
+// Re-check mute state when tab becomes visible
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    try {
+      chrome.storage.local.get(['globalMute'], (result) => {
+        if (chrome.runtime.lastError) return;
+        updateMuteButton(result.globalMute || false);
+      });
+    } catch {
+      // Extension context invalidated
+    }
+  }
+});
+
+// Listen for mute changes from popup
+try {
+  chrome.storage.onChanged.addListener((changes) => {
+    if (!isExtensionContextValid()) return;
+    if (changes.globalMute) {
+      updateMuteButton(changes.globalMute.newValue || false);
+    }
+  });
+} catch {
+  // Extension context invalidated
+}
+
+function updateMuteButton(isMuted) {
+  muteBtn.innerHTML = isMuted ? speakerOffSvg : speakerOnSvg;
+  muteBtn.className = isMuted ? 'muted' : 'unmuted';
+}
+
+// ============================================
 // Hotkey handling
 // ============================================
 
@@ -128,6 +197,9 @@ const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 
 const defaultHotkeys = {
   toggleLock: { key: 'Escape', ctrl: false, alt: false, meta: false, shift: false },
+  toggleMute: isMac
+    ? { key: 'm', ctrl: false, alt: false, meta: true, shift: true }
+    : { key: 'm', ctrl: false, alt: true, meta: false, shift: true },
   focusReply: { key: 'Tab', ctrl: false, alt: false, meta: false, shift: false },
   submitReply: isMac
     ? { key: 's', ctrl: false, alt: false, meta: true, shift: false }
@@ -181,6 +253,13 @@ document.addEventListener('keydown', (e) => {
   if (matchesHotkey(e, currentHotkeys.toggleLock) && !isTyping) {
     e.preventDefault();
     lockBtn.click();
+    return;
+  }
+
+  // Check toggleMute hotkey
+  if (matchesHotkey(e, currentHotkeys.toggleMute) && !isTyping) {
+    e.preventDefault();
+    muteBtn.click();
     return;
   }
 
@@ -325,6 +404,8 @@ function updateButtonPosition() {
     btn.style.top = (bottom + 10) + 'px';
     // Lock button below main button
     lockBtn.style.top = (bottom + 10 + 50 + 5) + 'px'; // btn height + gap
+    // Mute button below lock button
+    muteBtn.style.top = (bottom + 10 + 50 + 5 + 30 + 5) + 'px'; // btn + lock + gaps
   }
 
   // Align horizontally with avatar
@@ -336,6 +417,9 @@ function updateButtonPosition() {
     // Lock button centered under main button
     lockBtn.style.left = (avatarCenterX - 15) + 'px'; // 15 = half lock button width
     lockBtn.style.right = 'auto';
+    // Mute button centered under lock button
+    muteBtn.style.left = (avatarCenterX - 15) + 'px'; // 15 = half mute button width
+    muteBtn.style.right = 'auto';
   }
 }
 updateButtonPosition();
