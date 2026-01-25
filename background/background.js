@@ -7,12 +7,14 @@ const OFFSCREEN_DOCUMENT_PATH = 'offscreen/offscreen.html';
 // ============================================
 // CRASH PREVENTION: Catch unhandled errors
 // ============================================
+console.log('Polileo BG: ====== SERVICE WORKER STARTED ======', new Date().toISOString());
+
 self.addEventListener('error', (event) => {
-  console.error('Polileo BG: UNHANDLED ERROR:', event.error?.message || event.message);
+  console.error('Polileo BG: UNHANDLED ERROR:', event.error?.message || event.message, event.error?.stack);
 });
 
 self.addEventListener('unhandledrejection', (event) => {
-  console.error('Polileo BG: UNHANDLED REJECTION:', event.reason?.message || event.reason);
+  console.error('Polileo BG: UNHANDLED REJECTION:', event.reason?.message || event.reason, event.reason?.stack);
   event.preventDefault(); // Prevent crash
 });
 
@@ -23,30 +25,39 @@ self.addEventListener('unhandledrejection', (event) => {
 let creatingOffscreen = null;
 
 async function ensureOffscreenDocument() {
-  // Check if offscreen document already exists
-  const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
-  });
+  try {
+    // Check if offscreen document already exists
+    const existingContexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
+    });
 
-  if (existingContexts.length > 0) {
-    return; // Already exists
-  }
+    if (existingContexts.length > 0) {
+      return; // Already exists
+    }
 
-  // Avoid creating multiple offscreen documents simultaneously
-  if (creatingOffscreen) {
+    // Avoid creating multiple offscreen documents simultaneously
+    if (creatingOffscreen) {
+      await creatingOffscreen;
+      return;
+    }
+
+    creatingOffscreen = chrome.offscreen.createDocument({
+      url: OFFSCREEN_DOCUMENT_PATH,
+      reasons: ['AUDIO_PLAYBACK'],
+      justification: 'Play notification sound when new poleable thread is found'
+    });
+
     await creatingOffscreen;
-    return;
+    creatingOffscreen = null;
+
+    // Give the document a moment to initialize
+    await new Promise(r => setTimeout(r, 50));
+  } catch (e) {
+    console.log('Polileo BG: Error ensuring offscreen document:', e.message);
+    creatingOffscreen = null;
+    throw e;
   }
-
-  creatingOffscreen = chrome.offscreen.createDocument({
-    url: OFFSCREEN_DOCUMENT_PATH,
-    reasons: ['AUDIO_PLAYBACK'],
-    justification: 'Play notification sound when new poleable thread is found'
-  });
-
-  await creatingOffscreen;
-  creatingOffscreen = null;
 }
 
 // Helper to check if sound should play based on window active state
@@ -68,7 +79,7 @@ async function playNotificationSound() {
     if (globalMute) return; // Master mute
     if (soundEnabled === false) return;
     await ensureOffscreenDocument();
-    await chrome.runtime.sendMessage({ action: 'playNewThreadSound' });
+    await chrome.runtime.sendMessage({ action: 'playNewThreadSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play sound:', e.message);
   }
@@ -82,7 +93,7 @@ async function playSuccessSound(windowId) {
     if (soundSuccess === false) return;
     if (windowId && !(await shouldPlaySound(windowId))) return;
     await ensureOffscreenDocument();
-    await chrome.runtime.sendMessage({ action: 'playSuccessSound' });
+    await chrome.runtime.sendMessage({ action: 'playSuccessSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play success sound:', e.message);
   }
@@ -100,22 +111,38 @@ async function playNotPoleSound(windowId) {
     }
     if (windowId && !(await shouldPlaySound(windowId))) return;
     await ensureOffscreenDocument();
-    await chrome.runtime.sendMessage({ action: 'playNotPoleSound' });
+    await chrome.runtime.sendMessage({ action: 'playNotPoleSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play not-pole sound:', e.message);
   }
 }
 
 // Alguien más hizo la pole (informational detection)
-async function playPoleDetectedSound(windowId) {
+// Debounce specific to pole-detected to prevent multiple detectors from spamming
+let lastPoleDetectedTime = 0;
+
+async function playPoleDetectedSound(windowId, hasFocus = false) {
   try {
+    // Only play if tab has focus (passed from content script)
+    if (!hasFocus) {
+      console.log('Polileo BG: playPoleDetectedSound skipped - tab not focused');
+      return;
+    }
+
+    // Debounce: 500ms between pole-detected sounds
+    const now = Date.now();
+    if (now - lastPoleDetectedTime < 500) {
+      console.log('Polileo BG: playPoleDetectedSound debounced');
+      return;
+    }
+    lastPoleDetectedTime = now;
+
     const { globalMute, soundDetected } = await chrome.storage.local.get(['globalMute', 'soundDetected']);
-    console.log('Polileo BG: playPoleDetectedSound - globalMute:', globalMute, 'soundDetected:', soundDetected, 'windowId:', windowId);
+    console.log('Polileo BG: playPoleDetectedSound - globalMute:', globalMute, 'soundDetected:', soundDetected);
     if (globalMute) return; // Master mute
     if (soundDetected === false) return;
-    if (windowId && !(await shouldPlaySound(windowId))) return;
     await ensureOffscreenDocument();
-    await chrome.runtime.sendMessage({ action: 'playPoleDetectedSound' });
+    await chrome.runtime.sendMessage({ action: 'playPoleDetectedSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play pole-detected sound:', e.message);
   }
@@ -291,12 +318,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       updatePolling();
       updateBadge(windowId);
       sendResponse({ isActive: state.isActive });
+    }).catch(e => {
+      console.log('Polileo BG: Error in toggle:', e.message);
+      sendResponse({ isActive: false });
     });
     return true;
   } else if (msg.action === 'getStatus') {
     getWindowId().then(windowId => {
       const state = windowStates.get(windowId);
       sendResponse({ isActive: state?.isActive || false });
+    }).catch(e => {
+      console.log('Polileo BG: Error in getStatus:', e.message);
+      sendResponse({ isActive: false });
     });
     return true;
   } else if (msg.action === 'clearHistory') {
@@ -307,6 +340,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         saveStates();
       }
       sendResponse({ success: true });
+    }).catch(e => {
+      console.log('Polileo BG: Error in clearHistory:', e.message);
+      sendResponse({ success: false });
     });
     return true;
   } else if (msg.action === 'watchThread') {
@@ -371,8 +407,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   } else if (msg.action === 'requestPoleDetectedSound') {
     // Content script requesting pole-detected sound (someone else got pole)
-    const windowId = sender.tab?.windowId;
-    playPoleDetectedSound(windowId)
+    // hasFocus is passed from content script to ensure sound only plays when tab is focused
+    const hasFocus = msg.hasFocus || false;
+    playPoleDetectedSound(null, hasFocus)
       .then(() => sendResponse({ success: true }))
       .catch((e) => {
         console.log('Polileo BG: Error in requestPoleDetectedSound:', e.message);

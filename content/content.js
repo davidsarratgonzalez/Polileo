@@ -1931,9 +1931,10 @@ function showPoleDetectedNotification(poleAuthor) {
       refreshBtn.addEventListener('click', () => window.location.reload());
       alert.appendChild(refreshBtn);
       console.log('Polileo: Creating FAIL toast (red, with refresh)');
-      // Play pole-detected sound (important alert - play even without focus)
-      console.log('Polileo: Requesting pole-detected sound, hasFocus:', document.hasFocus());
-      safeSendMessage({ action: 'requestPoleDetectedSound' });
+      // Play pole-detected sound (only when tab has focus)
+      const hasFocus = document.hasFocus();
+      console.log('Polileo: Requesting pole-detected sound, hasFocus:', hasFocus);
+      safeSendMessage({ action: 'requestPoleDetectedSound', hasFocus });
     }
 
     document.body.appendChild(alert);
@@ -2466,10 +2467,10 @@ function safeSendMessage(msg, callback) {
 
         showPoleAlert(poleAuthor);
 
-        // Play sound (with guardrail)
-        if (isContextValid()) {
+        // Play sound (only when tab has focus)
+        if (isContextValid() && document.hasFocus()) {
           try {
-            chrome.runtime.sendMessage({ action: 'requestPoleDetectedSound' });
+            chrome.runtime.sendMessage({ action: 'requestPoleDetectedSound', hasFocus: true });
           } catch {
             // Extension context invalidated
           }
