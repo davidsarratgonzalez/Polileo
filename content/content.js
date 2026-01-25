@@ -7,10 +7,21 @@ function isExtensionContextValid() {
   }
 }
 
+// CRITICAL: Exit early if extension context is invalid (e.g., extension was reloaded)
+if (!isExtensionContextValid()) {
+  console.log('Polileo: Extension context invalid at load time, aborting');
+  throw new Error('Extension context invalid');
+}
+
 // Create floating button
 const btn = document.createElement('button');
 btn.id = 'polileo-btn';
-btn.innerHTML = `<img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="Polileo">`;
+try {
+  btn.innerHTML = `<img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="Polileo">`;
+} catch {
+  // Fallback if getURL fails
+  btn.textContent = 'P';
+}
 document.body.appendChild(btn);
 
 // Create lock button (focus lock)
@@ -126,7 +137,11 @@ lockBtn.addEventListener('click', () => {
       chrome.storage.local.get(['focusLockManual'], (result) => {
         if (chrome.runtime.lastError) return;
         const newState = !(result.focusLockManual || false);
-        chrome.storage.local.set({ focusLockManual: newState });
+        try {
+          chrome.storage.local.set({ focusLockManual: newState });
+        } catch {
+          // Extension context invalidated
+        }
         updateLockButton(newState);
       });
     } catch {
@@ -182,7 +197,11 @@ muteBtn.addEventListener('click', () => {
     chrome.storage.local.get(['globalMute'], (result) => {
       if (chrome.runtime.lastError) return;
       const newState = !(result.globalMute || false);
-      chrome.storage.local.set({ globalMute: newState });
+      try {
+        chrome.storage.local.set({ globalMute: newState });
+      } catch {
+        // Extension context invalidated
+      }
       updateMuteButton(newState);
     });
   } catch {
@@ -647,7 +666,11 @@ function setupSubmitDetector() {
           const timeSinceLastPost = Date.now() - (result.lastPostTime || 0);
           if (timeSinceLastPost > 5000) {
             console.log('Polileo: Submit click backup - starting cooldown');
-            chrome.storage.local.set({ lastPostTime: Date.now() });
+            try {
+              chrome.storage.local.set({ lastPostTime: Date.now() });
+            } catch {
+              // Extension context invalidated
+            }
             showCooldownBar();
 
             // Find the newest post (likely ours) and check position
@@ -761,10 +784,14 @@ if (window.location.href.includes('posted=1')) {
             postedIds.shift();
           }
 
-          chrome.storage.local.set({
-            lastPostTime: Date.now(),
-            postedIds: postedIds
-          });
+          try {
+            chrome.storage.local.set({
+              lastPostTime: Date.now(),
+              postedIds: postedIds
+            });
+          } catch {
+            // Extension context invalidated
+          }
           showCooldownBar();
 
           // Check our post's position immediately
@@ -1829,18 +1856,22 @@ function showPoleDetectedNotification(poleAuthor) {
 }
 
 // Listen for notifications from background
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.action === 'poleDetected' && !poleAlreadyDetected) {
-    showPoleDetectedNotification(msg.poleAuthor);
-  } else if (msg.action === 'windowStatusChanged') {
-    updateButton(msg.isActive);
-  } else if (msg.action === 'checkAndRegister') {
-    // GUARDRAIL: Background is asking us to verify/register this thread
-    checkAndRegisterThread();
-    sendResponse({ success: true });
-  }
-  return true;  // Keep channel open for async response
-});
+try {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === 'poleDetected' && !poleAlreadyDetected) {
+      showPoleDetectedNotification(msg.poleAuthor);
+    } else if (msg.action === 'windowStatusChanged') {
+      updateButton(msg.isActive);
+    } else if (msg.action === 'checkAndRegister') {
+      // GUARDRAIL: Background is asking us to verify/register this thread
+      checkAndRegisterThread();
+      sendResponse({ success: true });
+    }
+    return true;  // Keep channel open for async response
+  });
+} catch {
+  console.log('Polileo: Could not add message listener (extension context invalid)');
+}
 
 // ============================================
 // GUARDRAIL: Check and register thread if needed
