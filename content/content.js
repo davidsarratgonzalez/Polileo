@@ -122,6 +122,18 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+// Listen for lock state changes from other tabs (only for global state)
+try {
+  chrome.storage.onChanged.addListener((changes) => {
+    if (!isExtensionContextValid()) return;
+    if ('focusLockManual' in changes && !useLocalLockState) {
+      updateLockButton(changes.focusLockManual.newValue === true);
+    }
+  });
+} catch {
+  // Extension context invalidated
+}
+
 function updateLockButton(isLocked) {
   lockBtn.innerHTML = isLocked ? lockIconSvg : unlockIconSvg;
   lockBtn.className = isLocked ? 'locked' : 'unlocked';
@@ -172,21 +184,33 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Listen for mute changes from popup
+// Listen for mute changes from other tabs/popup
 try {
   chrome.storage.onChanged.addListener((changes) => {
     if (!isExtensionContextValid()) return;
-    if (changes.globalMute) {
-      updateMuteButton(changes.globalMute.newValue || false);
+    if ('globalMute' in changes) {
+      updateMuteButton(changes.globalMute.newValue === true);
     }
   });
 } catch {
   // Extension context invalidated
 }
 
+// Track state for mute button appearance
+let polileoIsActive = false;
+let soundOnlyWhenActive = true; // Default
+
+// Update mute button appearance based on whether sounds will actually play
+function updateMuteButtonState() {
+  const soundsWillPlay = !soundOnlyWhenActive || polileoIsActive;
+  muteBtn.classList.toggle('sound-inactive', !soundsWillPlay);
+}
+
 function updateMuteButton(isMuted) {
   muteBtn.innerHTML = isMuted ? speakerOffSvg : speakerOnSvg;
-  muteBtn.className = isMuted ? 'muted' : 'unmuted';
+  muteBtn.classList.remove('muted', 'unmuted');
+  muteBtn.classList.add(isMuted ? 'muted' : 'unmuted');
+  updateMuteButtonState();
 }
 
 // ============================================
@@ -455,7 +479,33 @@ btn.addEventListener('click', () => {
 });
 
 function updateButton(isActive) {
+  polileoIsActive = isActive;
   btn.className = isActive ? 'active' : 'inactive';
+  updateMuteButtonState();
+}
+
+// Load soundOnlyWhenActive setting
+try {
+  chrome.storage.local.get(['soundOnlyWhenActive'], (result) => {
+    if (chrome.runtime.lastError) return;
+    soundOnlyWhenActive = result.soundOnlyWhenActive !== false; // Default: true
+    updateMuteButtonState();
+  });
+} catch {
+  // Extension context invalidated
+}
+
+// Listen for soundOnlyWhenActive changes
+try {
+  chrome.storage.onChanged.addListener((changes) => {
+    if (!isExtensionContextValid()) return;
+    if (changes.soundOnlyWhenActive) {
+      soundOnlyWhenActive = changes.soundOnlyWhenActive.newValue !== false;
+      updateMuteButtonState();
+    }
+  });
+} catch {
+  // Extension context invalidated
 }
 
 // ============================================
