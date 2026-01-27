@@ -159,6 +159,18 @@ async function reinjectContentScripts() {
             files: ['content/content.js']
           });
           console.log('Polileo BG: [REINJECT] ✓ Tab', tab.id, 're-injected successfully');
+          // Restore active state to the re-injected content script
+          const state = windowStates.get(tab.windowId);
+          const isActive = state?.isActive || false;
+          if (isActive) {
+            try {
+              await chrome.tabs.sendMessage(tab.id, {
+                action: 'windowStatusChanged',
+                isActive: true
+              });
+              console.log('Polileo BG: [REINJECT] Restored active state to tab', tab.id);
+            } catch { /* content script may not be ready yet */ }
+          }
         } catch (e) {
           console.log('Polileo BG: [REINJECT] Failed to re-inject tab', tab.id, ':', e.message);
         }
@@ -169,8 +181,16 @@ async function reinjectContentScripts() {
   }
 }
 
-// Run re-injection on startup (small delay to let service worker fully initialize)
-setTimeout(reinjectContentScripts, 1000);
+// Run re-injection on startup, but only after storage is loaded so we can
+// restore the correct active state to re-injected content scripts.
+function reinjectWhenReady() {
+  if (storageLoaded) {
+    reinjectContentScripts();
+  } else {
+    setTimeout(reinjectWhenReady, 200);
+  }
+}
+setTimeout(reinjectWhenReady, 500);
 
 // ============================================
 // OFFSCREEN DOCUMENT & SOUND PLAYBACK
@@ -481,7 +501,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true;
   } else if (msg.action === 'getStatus') {
-    getWindowId().then(windowId => {
+    // Wait for storage to load before responding, so we don't falsely report inactive
+    const waitForStorage = () => new Promise((resolve) => {
+      if (storageLoaded) return resolve();
+      const check = setInterval(() => {
+        if (storageLoaded) { clearInterval(check); resolve(); }
+      }, 50);
+      // Safety timeout: don't wait forever
+      setTimeout(() => { clearInterval(check); resolve(); }, 3000);
+    });
+    waitForStorage().then(() => getWindowId()).then(windowId => {
       const state = windowStates.get(windowId);
       sendResponse({ isActive: state?.isActive || false });
     }).catch(e => {
