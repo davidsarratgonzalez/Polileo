@@ -814,10 +814,15 @@ async function poll() {
   }
 
   try {
+    const pollController = new AbortController();
+    const pollTimeoutId = setTimeout(() => pollController.abort(), 10000); // 10s timeout
+
     const resp = await fetch(`${FOROCOCHES_URL}&_=${Date.now()}`, {
       credentials: 'include',
-      cache: 'no-store'
+      cache: 'no-store',
+      signal: pollController.signal
     });
+    clearTimeout(pollTimeoutId);
 
     if (resp.ok) {
       const html = await resp.text();

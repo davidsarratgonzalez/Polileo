@@ -1383,7 +1383,12 @@ async function deletePost(postId) {
 
 // Verify that a post has been deleted by checking if it still exists
 // IMPORTANT: We check the POST DIRECTLY, not the thread (which might be paginated)
+// All verification fetches share a single AbortController with a 15s global timeout.
 async function verifyPostDeleted(postId) {
+  const verifyController = new AbortController();
+  const verifyTimeoutId = setTimeout(() => verifyController.abort(), 15000); // 15s total for all methods
+  const verifyOpts = { credentials: 'include', cache: 'no-store', signal: verifyController.signal };
+
   try {
     const baseUrl = window.location.origin + '/foro';
 
@@ -1395,8 +1400,7 @@ async function verifyPostDeleted(postId) {
     console.log('Polileo: [VERIFY] Method 1 - Fetching post directly:', postUrl);
 
     const postResp = await fetch(postUrl, {
-      credentials: 'include',
-      cache: 'no-store',
+      ...verifyOpts,
       headers: {
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache'
@@ -1430,10 +1434,7 @@ async function verifyPostDeleted(postId) {
     const editUrl = `${baseUrl}/editpost.php?do=editpost&p=${postId}&_=${Date.now()}`;
     console.log('Polileo: [VERIFY] Method 2 - Checking edit page:', editUrl);
 
-    const editResp = await fetch(editUrl, {
-      credentials: 'include',
-      cache: 'no-store'
-    });
+    const editResp = await fetch(editUrl, verifyOpts);
 
     if (!editResp.ok) {
       console.log('Polileo: [VERIFY] Edit page returned', editResp.status, '- post deleted');
@@ -1476,10 +1477,7 @@ async function verifyPostDeleted(postId) {
       const lastPageUrl = `${baseUrl}/showthread.php?t=${tid}&goto=lastpost&_=${Date.now()}`;
       console.log('Polileo: [VERIFY] Method 3 - Checking last page:', lastPageUrl);
 
-      const lastPageResp = await fetch(lastPageUrl, {
-        credentials: 'include',
-        cache: 'no-store'
-      });
+      const lastPageResp = await fetch(lastPageUrl, verifyOpts);
 
       if (lastPageResp.ok) {
         const lastPageHtml = await lastPageResp.text();
@@ -1502,6 +1500,8 @@ async function verifyPostDeleted(postId) {
     console.log('Polileo: [VERIFY] Error:', e.message);
     // On error, assume NOT deleted (safer)
     return false;
+  } finally {
+    clearTimeout(verifyTimeoutId);
   }
 }
 
@@ -2691,11 +2691,15 @@ function safeSendMessage(msg, callback) {
   async function checkForPole(tid) {
     if (poleDetectedInFullEditor || !isContextValid()) return;
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
+
     try {
       const resp = await fetch(
         `${window.location.origin}/foro/showthread.php?t=${tid}&_=${Date.now()}`,
-        { credentials: 'include', cache: 'no-store' }
+        { credentials: 'include', cache: 'no-store', signal: controller.signal }
       );
+      clearTimeout(timeoutId);
 
       if (!resp.ok) return;
 
@@ -2726,7 +2730,8 @@ function safeSendMessage(msg, callback) {
         }
       }
     } catch (e) {
-      // Network error, will retry
+      clearTimeout(timeoutId);
+      // Network error or timeout, will retry
       log('Check error:', e.message);
     }
   }
