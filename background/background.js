@@ -347,6 +347,55 @@ function playPoleDetectedSound(windowId, hasFocus = false) {
   } catch { /* non-fatal */ }
 }
 
+// Open a pole tab with automatic retries. Fire-and-forget, never blocks the poll loop.
+// Retries up to 4 times with escalating delays: 150ms, 500ms, 1s, 2s.
+// First attempt targets the specific window; retries use getLastFocused as fallback.
+// Deduplication: checks existing tabs before each attempt to prevent double-opens
+// (can happen if concurrent polls both find the same thread before openedThreads.add runs).
+const _TAB_RETRY_DELAYS = [150, 500, 1000, 2000]; // 4 retries
+const _tabsInFlight = new Set(); // Tracks pole IDs currently being opened (across all attempts)
+
+function openPoleTab(url, windowId, poleId) {
+  if (_tabsInFlight.has(poleId)) return; // Another openPoleTab call already handling this pole
+  _tabsInFlight.add(poleId);
+  _openPoleTabAttempt(url, windowId, 0, poleId);
+}
+
+async function _openPoleTabAttempt(url, windowId, attempt, poleId) {
+  try {
+    // Before creating, check if a tab with this thread already exists (prevents duplicates)
+    const allTabs = await chrome.tabs.query({ url: '*://*.forocoches.com/foro/showthread.php*' });
+    const alreadyOpen = allTabs.some(t => t.url && t.url.includes(`t=${poleId}`) && t.url.includes('polileo'));
+    if (alreadyOpen) {
+      console.log('Polileo BG: Tab already exists for pole', poleId, '— skipping');
+      // Keep in _tabsInFlight for 10s to prevent any other source from re-opening
+      setTimeout(() => _tabsInFlight.delete(poleId), 10000);
+      return;
+    }
+
+    if (attempt === 0) {
+      // First attempt: target specific window with focus lock check
+      const shouldLock = await shouldLockFocusForWindow(windowId);
+      await chrome.tabs.create({ url: `${url}&polileo`, active: !shouldLock, windowId });
+    } else {
+      // Retries: use last focused window (more resilient)
+      const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+      await chrome.tabs.create({ url: `${url}&polileo`, active: false, windowId: win.id });
+    }
+    console.log('Polileo BG: ✓ Tab opened for pole', poleId + (attempt > 0 ? ` (retry #${attempt})` : ''));
+    // Keep in _tabsInFlight for 10s to prevent concurrent polls from re-opening
+    setTimeout(() => _tabsInFlight.delete(poleId), 10000);
+  } catch (e) {
+    console.log('Polileo BG: tabs.create attempt', attempt, 'failed for pole', poleId + ':', e.message);
+    if (attempt < _TAB_RETRY_DELAYS.length) {
+      setTimeout(() => _openPoleTabAttempt(url, windowId, attempt + 1, poleId), _TAB_RETRY_DELAYS[attempt]);
+    } else {
+      console.log('Polileo BG: ⚠️ Tab creation failed after', attempt, 'retries for pole', poleId);
+      _tabsInFlight.delete(poleId); // Allow next poll cycle to retry
+    }
+  }
+}
+
 // Timing defaults
 const DEFAULT_TIMINGS = {
   pollInterval: 500,       // 500ms for forum polling
@@ -846,10 +895,20 @@ function stopPollHealthCheck() {
   }
 }
 
+// Guard against concurrent polls (alarm + pollTimer + healthCheck can all call poll())
+let _polling = false;
+
 async function poll() {
+  if (_polling) {
+    console.log('Polileo BG: poll() skipped — already in progress');
+    return;
+  }
+  _polling = true;
+
   const activeWindows = [...windowStates.entries()].filter(([, s]) => s.isActive);
   console.log('Polileo BG: poll() called, activeWindows:', activeWindows.length);
   if (activeWindows.length === 0) {
+    _polling = false;
     pollTimer = null;
     return;
   }
@@ -905,38 +964,16 @@ async function poll() {
             }
 
             console.log('Polileo BG: Opening new pole:', pole.id, pole.title);
+            state.openedThreads.add(pole.id);
+            // Cleanup old threads if limit exceeded
+            while (state.openedThreads.size > MAX_OPENED_THREADS) {
+              const oldest = state.openedThreads.values().next().value;
+              state.openedThreads.delete(oldest);
+            }
             // Play notification sound (fire-and-forget — never blocks core)
             playNotificationSound();
-            // Open tab in the target window (with focus lock check)
-            let tabCreated = false;
-            try {
-              const shouldLock = await shouldLockFocusForWindow(windowId);
-              await chrome.tabs.create({ url: `${pole.url}&polileo`, active: !shouldLock, windowId });
-              tabCreated = true;
-            } catch (tabErr) {
-              // Window might have closed or Chrome UI state prevents tab creation — retry without windowId
-              console.log('Polileo BG: tabs.create failed for window', windowId, ':', tabErr.message, '— retrying in last focused window');
-              try {
-                const fallbackWin = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
-                await chrome.tabs.create({ url: `${pole.url}&polileo`, active: false, windowId: fallbackWin.id });
-                tabCreated = true;
-              } catch (e2) {
-                console.log('Polileo BG: tabs.create fallback also failed:', e2.message);
-              }
-            }
-
-            if (tabCreated) {
-              // Only mark as opened if the tab was actually created
-              state.openedThreads.add(pole.id);
-              // Cleanup old threads if limit exceeded
-              while (state.openedThreads.size > MAX_OPENED_THREADS) {
-                const oldest = state.openedThreads.values().next().value;
-                state.openedThreads.delete(oldest);
-              }
-            } else {
-              // Tab creation failed — do NOT mark as opened so next poll retries
-              console.log('Polileo BG: ⚠️ Tab NOT created for pole', pole.id, '— will retry next poll');
-            }
+            // Open tab with retry system (fire-and-forget — never blocks poll loop)
+            openPoleTab(pole.url, windowId, pole.id);
           } else {
             console.log('Polileo BG: Pole already opened:', pole.id);
           }
@@ -948,6 +985,7 @@ async function poll() {
     clearTimeout(pollTimeoutId);
     console.log('Polileo BG: Error during poll:', e.message);
   } finally {
+    _polling = false;
     // ALWAYS schedule next poll if there are active windows (even after errors)
     if ([...windowStates.values()].some(s => s.isActive)) {
       pollTimer = setTimeout(poll, POLL_INTERVAL);
