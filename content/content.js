@@ -2173,14 +2173,18 @@ try {
     }
     if (msg.action === 'poleDetected' && !poleAlreadyDetected) {
       showPoleDetectedNotification(msg.poleAuthor);
+      return;
     } else if (msg.action === 'windowStatusChanged') {
       updateButton(msg.isActive);
+      return;
     } else if (msg.action === 'checkAndRegister') {
       // GUARDRAIL: Background is asking us to verify/register this thread
       checkAndRegisterThread();
       sendResponse({ success: true });
+      return;
     }
-    return true;  // Keep channel open for async response
+    // Unknown action — don't keep channel open (avoids interfering with
+    // messages meant for other contexts like the offscreen document)
   });
 } catch {
   console.log('Polileo: Could not add message listener (extension context invalid)');

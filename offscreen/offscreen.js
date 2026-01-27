@@ -15,10 +15,11 @@ let audioContext = null;
 
 // Initialize audio context on first use
 function getAudioContext() {
-  if (!audioContext) {
+  // Recreate if closed (system revoked audio resources) or not yet created
+  if (!audioContext || audioContext.state === 'closed') {
     audioContext = new AudioContext();
   }
-  // Resume if suspended
+  // Resume if suspended (e.g., browser autoplay policy)
   if (audioContext.state === 'suspended') {
     audioContext.resume();
   }
