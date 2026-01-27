@@ -217,17 +217,19 @@ function tryCreateOffscreen() {
     documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
   }).then(contexts => {
     if (contexts.length > 0) {
+      // Already alive — nothing to do
       _offscreenCreating = false;
-      return;
+      return; // returns undefined — skip creation
     }
     return chrome.offscreen.createDocument({
       url: OFFSCREEN_DOCUMENT_PATH,
       reasons: ['AUDIO_PLAYBACK'],
       justification: 'Play notification sounds for pole detection'
+    }).then(() => {
+      console.log('Polileo BG: ✓ Offscreen document created');
     });
   }).then(() => {
     _offscreenCreating = false;
-    console.log('Polileo BG: ✓ Offscreen document ready');
   }).catch(e => {
     _offscreenCreating = false;
     if (e.message && e.message.includes('single offscreen')) {
