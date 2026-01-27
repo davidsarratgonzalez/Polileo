@@ -362,17 +362,23 @@ function openPoleTab(url, windowId, poleId) {
 }
 
 async function _openPoleTabAttempt(url, windowId, attempt, poleId) {
+  // Deduplication: check if a tab with this exact thread+polileo already exists.
+  // Uses regex word boundary to avoid substring false positives (e.g., t=123 matching t=1234).
+  // Non-blocking: if the query fails, we proceed with tab creation anyway (better duplicate than missed pole).
   try {
-    // Before creating, check if a tab with this thread already exists (prevents duplicates)
     const allTabs = await chrome.tabs.query({ url: '*://*.forocoches.com/foro/showthread.php*' });
-    const alreadyOpen = allTabs.some(t => t.url && t.url.includes(`t=${poleId}`) && t.url.includes('polileo'));
+    const polePattern = new RegExp('[?&]t=' + poleId + '(?:&|$)');
+    const alreadyOpen = allTabs.some(t => t.url && polePattern.test(t.url) && t.url.includes('polileo'));
     if (alreadyOpen) {
       console.log('Polileo BG: Tab already exists for pole', poleId, '— skipping');
-      // Keep in _tabsInFlight for 10s to prevent any other source from re-opening
       setTimeout(() => _tabsInFlight.delete(poleId), 10000);
       return;
     }
+  } catch {
+    // tabs.query failed — proceed with creation anyway (don't waste a retry on a query error)
+  }
 
+  try {
     if (attempt === 0) {
       // First attempt: target specific window with focus lock check
       const shouldLock = await shouldLockFocusForWindow(windowId);
@@ -383,7 +389,6 @@ async function _openPoleTabAttempt(url, windowId, attempt, poleId) {
       await chrome.tabs.create({ url: `${url}&polileo`, active: false, windowId: win.id });
     }
     console.log('Polileo BG: ✓ Tab opened for pole', poleId + (attempt > 0 ? ` (retry #${attempt})` : ''));
-    // Keep in _tabsInFlight for 10s to prevent concurrent polls from re-opening
     setTimeout(() => _tabsInFlight.delete(poleId), 10000);
   } catch (e) {
     console.log('Polileo BG: tabs.create attempt', attempt, 'failed for pole', poleId + ':', e.message);
