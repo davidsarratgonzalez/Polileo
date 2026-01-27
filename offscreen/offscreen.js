@@ -147,30 +147,35 @@ function playPoleDetectedSound() {
   });
 }
 
-// Safe wrapper — sound errors must never crash the offscreen document
+// Safe wrapper — returns true if sound played, false if error
 function safePlay(fn) {
-  try { fn(); } catch (e) {
+  try {
+    fn();
+    return true;
+  } catch (e) {
     console.log('Polileo Offscreen: Sound error:', e.message);
+    // Try to recover AudioContext for next attempt
+    try {
+      audioContext = new AudioContext();
+    } catch { /* give up */ }
+    return false;
   }
 }
 
 // Listen for messages from the background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'playSound' || message.action === 'playNewThreadSound') {
-    safePlay(playNewThreadSound);
-    sendResponse({ success: true });
-    return;
-  } else if (message.action === 'playSuccessSound') {
-    safePlay(playSuccessSound);
-    sendResponse({ success: true });
-    return;
-  } else if (message.action === 'playNotPoleSound') {
-    safePlay(playNotPoleSound);
-    sendResponse({ success: true });
-    return;
-  } else if (message.action === 'playPoleDetectedSound') {
-    safePlay(playPoleDetectedSound);
-    sendResponse({ success: true });
+  const soundMap = {
+    'playSound': playNewThreadSound,
+    'playNewThreadSound': playNewThreadSound,
+    'playSuccessSound': playSuccessSound,
+    'playNotPoleSound': playNotPoleSound,
+    'playPoleDetectedSound': playPoleDetectedSound
+  };
+
+  const fn = soundMap[message.action];
+  if (fn) {
+    const ok = safePlay(fn);
+    sendResponse({ success: ok });
     return;
   }
   // Unknown action — don't hold the message channel open

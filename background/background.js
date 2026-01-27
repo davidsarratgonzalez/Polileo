@@ -260,16 +260,22 @@ setInterval(() => {
 }, 30000);
 
 // Fire-and-forget sound dispatch. Never awaits, never blocks, never throws.
+// On failure: recreates offscreen and retries once after a short delay.
 function fireSound(action) {
   chrome.runtime.sendMessage({ action }).then(response => {
-    // If offscreen is alive, it responds { success: true }.
-    // If not (e.g., only content scripts received it), response is undefined.
     if (!response?.success) {
+      // Offscreen dead or sound failed — recreate and retry once
       tryCreateOffscreen();
+      setTimeout(() => {
+        chrome.runtime.sendMessage({ action }).catch(() => {});
+      }, 500);
     }
   }).catch(() => {
-    // No listeners at all — recreate offscreen
+    // No listeners at all — recreate offscreen and retry once
     tryCreateOffscreen();
+    setTimeout(() => {
+      chrome.runtime.sendMessage({ action }).catch(() => {});
+    }, 500);
   });
 }
 
