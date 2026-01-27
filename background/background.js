@@ -253,23 +253,15 @@ setInterval(() => {
 
 // Fire-and-forget sound dispatch. Never awaits, never blocks, never throws.
 function fireSound(action) {
-  chrome.runtime.sendMessage({ action }).catch(() => {
-    // Offscreen is dead — recreate it so the next sound works
+  chrome.runtime.sendMessage({ action }).then(response => {
+    // If offscreen is alive, it responds { success: true }.
+    // If not (e.g., only content scripts received it), response is undefined.
+    if (!response?.success) {
+      tryCreateOffscreen();
+    }
+  }).catch(() => {
+    // No listeners at all — recreate offscreen
     tryCreateOffscreen();
-  });
-}
-
-// Helper to check if sound should play based on window active state
-function shouldPlaySound(windowId) {
-  return new Promise(resolve => {
-    try {
-      chrome.storage.local.get(['soundOnlyWhenActive'], (result) => {
-        if (chrome.runtime.lastError) return resolve(true);
-        if (result.soundOnlyWhenActive === false) return resolve(true);
-        const state = windowStates.get(windowId);
-        resolve(state?.isActive || false);
-      });
-    } catch { resolve(true); }
   });
 }
 
@@ -435,6 +427,9 @@ chrome.storage.local.get(['windowStates'], (result) => {
 
 // Alarm wakes up service worker if it sleeps
 chrome.alarms.onAlarm.addListener((alarm) => {
+  // Every alarm wakeup: ensure offscreen is alive (setInterval dies on SW sleep)
+  tryCreateOffscreen();
+
   if (alarm.name === ALARM_NAME) {
     poll();
   } else if (alarm.name === THREAD_WATCH_ALARM) {

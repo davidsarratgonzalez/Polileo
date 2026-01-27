@@ -2724,10 +2724,17 @@ function safeSendMessage(msg, callback) {
 
         showPoleAlert(poleAuthor);
 
+        // Check if it's our own pole to avoid sound overlap
+        const currentUser = getCurrentUsername();
+        const isOwnPole = poleAuthor && currentUser &&
+          poleAuthor.toLowerCase().trim() === currentUser.toLowerCase().trim();
+
         // Play sound (only when tab has focus)
+        // If it's our own pole, play success sound (not poleDetected, which would overlap)
         if (isContextValid() && document.hasFocus()) {
           try {
-            chrome.runtime.sendMessage({ action: 'requestPoleDetectedSound', hasFocus: true });
+            const soundAction = isOwnPole ? 'requestSuccessSound' : 'requestPoleDetectedSound';
+            chrome.runtime.sendMessage({ action: soundAction, hasFocus: true });
           } catch {
             // Extension context invalidated
           }
