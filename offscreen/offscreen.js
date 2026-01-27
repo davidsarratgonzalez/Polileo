@@ -159,17 +159,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'playSound' || message.action === 'playNewThreadSound') {
     safePlay(playNewThreadSound);
     sendResponse({ success: true });
+    return;
   } else if (message.action === 'playSuccessSound') {
     safePlay(playSuccessSound);
     sendResponse({ success: true });
+    return;
   } else if (message.action === 'playNotPoleSound') {
     safePlay(playNotPoleSound);
     sendResponse({ success: true });
+    return;
   } else if (message.action === 'playPoleDetectedSound') {
     safePlay(playPoleDetectedSound);
     sendResponse({ success: true });
+    return;
   }
-  return true;
+  // Unknown action — don't hold the message channel open
 });
 
 // Prevent unhandled errors from crashing the offscreen document

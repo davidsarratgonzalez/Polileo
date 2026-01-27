@@ -205,14 +205,19 @@ setTimeout(reinjectWhenReady, 500);
 // ============================================
 
 // Try to create the offscreen document. Fire-and-forget, never throws.
+// Guard flag prevents concurrent creation attempts (race between health check, alarm, fireSound).
+let _offscreenCreating = false;
+
 function tryCreateOffscreen() {
-  // Use getContexts to check first (avoids noisy "already exists" errors)
+  if (_offscreenCreating) return; // Another call already in flight
+  _offscreenCreating = true;
+
   chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT'],
     documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
   }).then(contexts => {
     if (contexts.length > 0) {
-      console.log('Polileo BG: Offscreen document already alive');
+      _offscreenCreating = false;
       return;
     }
     return chrome.offscreen.createDocument({
@@ -221,11 +226,12 @@ function tryCreateOffscreen() {
       justification: 'Play notification sounds for pole detection'
     });
   }).then(() => {
+    _offscreenCreating = false;
     console.log('Polileo BG: ✓ Offscreen document ready');
   }).catch(e => {
-    // "Only a single offscreen document" = already exists = fine
+    _offscreenCreating = false;
     if (e.message && e.message.includes('single offscreen')) {
-      console.log('Polileo BG: Offscreen document already exists (confirmed)');
+      // Already exists — perfectly fine
     } else {
       console.log('Polileo BG: Offscreen creation failed (non-fatal):', e.message);
     }
