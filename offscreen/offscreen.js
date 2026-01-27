@@ -9,6 +9,13 @@
  * - Success: Ascending major arpeggio (pole achieved)
  * - Not pole: Descending minor chord (your attempt failed)
  * - Pole detected: Two descending tones (someone else got pole)
+ *
+ * Resilience:
+ * - safePlay() wraps all sound calls: reports true/false to background (not just delivery)
+ * - On AudioContext failure: auto-recreates context for the next attempt
+ * - Global error/unhandledrejection handlers prevent document crashes
+ * - Background retries sound up to 2x if this document reports failure
+ * - Background auto-recreates this document if it dies (health check + on-demand)
  */
 
 let audioContext = null;

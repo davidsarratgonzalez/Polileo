@@ -14,17 +14,19 @@
  *   Storage persists state across service worker restarts.
  *
  * File structure:
- *   1. Crash prevention (global error/rejection handlers)
- *   2. Offscreen document & sound playback functions
- *   3. Timing configuration (poll interval, thread check interval)
- *   4. State management (windowStates, watchedThreads, storage persistence)
- *   5. Chrome event listeners (alarms, windows, tabs)
- *   6. Message handler (toggle, getStatus, watchThread, sound requests, etc.)
- *   7. Guardrails (tab URL watcher + aggressive periodic scan)
- *   8. Forum polling loop (findPoles, open tabs, blacklist filtering)
- *   9. Badge management (per-tab, per-window, startup sync)
- *  10. Thread watching system (parallel checks, immediate reactivity on tab/window switch)
- *  11. HTML parsing helpers (countPostsInHtml, extractPoleAuthor)
+ *   1. Crash prevention (global error/rejection handlers, persistent crash log)
+ *   2. Content script re-injection on startup (orphaned scripts recovery)
+ *   3. Offscreen document management (eager create, health check, singleton guard)
+ *   4. Sound playback (fire-and-forget dispatch with auto-retry on failure)
+ *   5. Timing configuration (poll interval, thread check interval)
+ *   6. State management (windowStates, watchedThreads, storage persistence)
+ *   7. Chrome event listeners (alarms, windows, tabs)
+ *   8. Message handler (toggle, getStatus, watchThread, sound requests, etc.)
+ *   9. Guardrails (tab URL watcher + aggressive periodic scan)
+ *  10. Forum polling loop (findPoles, open tabs, blacklist filtering)
+ *  11. Badge management (per-tab, per-window, startup sync)
+ *  12. Thread watching system (parallel checks, immediate reactivity on tab/window switch)
+ *  13. HTML parsing helpers (countPostsInHtml, extractPoleAuthor)
  */
 
 const FOROCOCHES_URL = 'https://www.forocoches.com/foro/forumdisplay.php?f=2';
@@ -196,12 +198,15 @@ setTimeout(reinjectWhenReady, 500);
 // OFFSCREEN DOCUMENT & SOUND PLAYBACK
 // Uses Manifest V3 offscreen document for audio (service workers can't play audio).
 //
-// Architecture: EAGER CREATE + HEALTH CHECK
+// Architecture: EAGER CREATE + HEALTH CHECK + AUTO-RETRY
 //   - Offscreen document is created once at startup (fire-and-forget)
 //   - A periodic health check (every 30s) recreates it if it died
-//   - Sound functions just sendMessage — no creation, no await, no blocking
-//   - If offscreen is dead, a sound is missed but nothing crashes
-//   - The health check recreates it so the next sound works
+//   - Every alarm wakeup also ensures offscreen is alive (setInterval dies on SW sleep)
+//   - Sound dispatch is fire-and-forget — no await, no blocking, never crashes core
+//   - On sound failure: recreates offscreen + retries up to 2x (at +100ms, +400ms)
+//   - Offscreen reports actual audio success/failure (not just message delivery)
+//   - Singleton guard (_offscreenCreating flag) prevents concurrent creation races
+//   - Chrome also enforces single offscreen at API level (belt + suspenders)
 // ============================================
 
 // Try to create the offscreen document. Fire-and-forget, never throws.
@@ -265,18 +270,20 @@ function fireSound(action) {
   _fireSoundAttempt(action, 0);
 }
 
+// Recursive retry: attempt 0 = original, 1 = retry at +100ms, 2 = retry at +400ms.
+// Offscreen reports { success: true/false } reflecting actual audio playback, not just message delivery.
+// Only the first failure triggers offscreen recreation (subsequent retries just re-send the message).
 function _fireSoundAttempt(action, attempt) {
-  if (attempt > 2) return; // Give up after 3 total attempts (0, 1, 2)
+  if (attempt > 2) return; // Max 3 total attempts (0, 1, 2)
 
   chrome.runtime.sendMessage({ action }).then(response => {
     if (response?.success) return; // Sound played — done
 
-    // Failed — recreate offscreen and schedule retry
-    if (attempt === 0) tryCreateOffscreen(); // Only recreate on first failure
-    const delay = attempt === 0 ? 100 : 300; // 100ms first retry, 300ms second
+    if (attempt === 0) tryCreateOffscreen(); // Recreate only on first failure
+    const delay = attempt === 0 ? 100 : 300;
     setTimeout(() => _fireSoundAttempt(action, attempt + 1), delay);
   }).catch(() => {
-    // No listeners at all
+    // No listeners at all (offscreen + content scripts all dead)
     if (attempt === 0) tryCreateOffscreen();
     const delay = attempt === 0 ? 100 : 300;
     setTimeout(() => _fireSoundAttempt(action, attempt + 1), delay);
