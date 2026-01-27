@@ -905,27 +905,37 @@ async function poll() {
             }
 
             console.log('Polileo BG: Opening new pole:', pole.id, pole.title);
-            state.openedThreads.add(pole.id);
-            // Cleanup old threads if limit exceeded
-            while (state.openedThreads.size > MAX_OPENED_THREADS) {
-              const oldest = state.openedThreads.values().next().value;
-              state.openedThreads.delete(oldest);
-            }
             // Play notification sound (fire-and-forget — never blocks core)
             playNotificationSound();
             // Open tab in the target window (with focus lock check)
+            let tabCreated = false;
             try {
               const shouldLock = await shouldLockFocusForWindow(windowId);
               await chrome.tabs.create({ url: `${pole.url}&polileo`, active: !shouldLock, windowId });
+              tabCreated = true;
             } catch (tabErr) {
               // Window might have closed or Chrome UI state prevents tab creation — retry without windowId
               console.log('Polileo BG: tabs.create failed for window', windowId, ':', tabErr.message, '— retrying in last focused window');
               try {
                 const fallbackWin = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
                 await chrome.tabs.create({ url: `${pole.url}&polileo`, active: false, windowId: fallbackWin.id });
+                tabCreated = true;
               } catch (e2) {
                 console.log('Polileo BG: tabs.create fallback also failed:', e2.message);
               }
+            }
+
+            if (tabCreated) {
+              // Only mark as opened if the tab was actually created
+              state.openedThreads.add(pole.id);
+              // Cleanup old threads if limit exceeded
+              while (state.openedThreads.size > MAX_OPENED_THREADS) {
+                const oldest = state.openedThreads.values().next().value;
+                state.openedThreads.delete(oldest);
+              }
+            } else {
+              // Tab creation failed — do NOT mark as opened so next poll retries
+              console.log('Polileo BG: ⚠️ Tab NOT created for pole', pole.id, '— will retry next poll');
             }
           } else {
             console.log('Polileo BG: Pole already opened:', pole.id);
