@@ -1,5 +1,15 @@
-// Offscreen document for playing notification sounds
-// This runs independently of any tab, ensuring consistent audio playback
+/**
+ * Polileo - Offscreen Document (Audio Playback)
+ *
+ * Runs as a Manifest V3 offscreen document dedicated to playing notification sounds.
+ * Uses Web Audio API (AudioContext + oscillators) for lightweight synthesized audio.
+ *
+ * Sound types:
+ * - New thread: Two quick pips (neutral alert)
+ * - Success: Ascending major arpeggio (pole achieved)
+ * - Not pole: Descending minor chord (your attempt failed)
+ * - Pole detected: Two descending tones (someone else got pole)
+ */
 
 let audioContext = null;
 
@@ -44,7 +54,7 @@ function playNewThreadSound() {
   });
 }
 
-// Pole conseguida - triumphant ascending arpeggio (major chord: C-E-G feel)
+// Pole achieved - triumphant ascending arpeggio (major chord: C-E-G feel)
 function playSuccessSound() {
   const ctx = getAudioContext();
   const now = ctx.currentTime;
@@ -74,13 +84,13 @@ function playSuccessSound() {
   });
 }
 
-// Tu post no fue pole - sad descending sound (you tried and failed)
+// Your post was not pole - sad descending sound (you tried and failed)
 // More dramatic: G4-Eb4-C4 descending minor chord
 function playNotPoleSound() {
   const ctx = getAudioContext();
   const now = ctx.currentTime;
 
-  // Descending minor: G4-Eb4-C4 (disappointed, you tried and failed)
+  // Descending minor: G4-Eb4-C4 (disappointed feel, you tried and failed)
   const frequencies = [392, 311, 262];
   const duration = 0.12;
   const gap = 0.05;
@@ -105,7 +115,7 @@ function playNotPoleSound() {
   });
 }
 
-// Alguien más hizo la pole - informational alert (detection, not your attempt)
+// Someone else got the pole - informational alert (detection, not your attempt)
 // Two quick descending tones: different from new thread sound
 function playPoleDetectedSound() {
   const ctx = getAudioContext();

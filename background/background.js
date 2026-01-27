@@ -1,3 +1,32 @@
+/**
+ * Polileo - Background Service Worker
+ *
+ * Manages the core extension logic running as a Manifest V3 service worker:
+ * - Forum polling: Periodically scans the forum for threads with 0 replies ("poles")
+ * - Thread watching: Monitors open threads for new replies (pole detection)
+ * - Sound playback: Coordinates audio notifications via offscreen document
+ * - State management: Persists window states and watched threads to storage
+ * - Guardrails: Multiple redundant systems ensure no poleable thread is missed
+ * - Health checks: Self-healing timers that restart if any component dies
+ *
+ * Architecture:
+ *   Service Worker <-> Content Script (per tab) <-> Offscreen Document (audio)
+ *   Storage persists state across service worker restarts.
+ *
+ * File structure:
+ *   1. Crash prevention (global error/rejection handlers)
+ *   2. Offscreen document & sound playback functions
+ *   3. Timing configuration (poll interval, thread check interval)
+ *   4. State management (windowStates, watchedThreads, storage persistence)
+ *   5. Chrome event listeners (alarms, windows, tabs)
+ *   6. Message handler (toggle, getStatus, watchThread, sound requests, etc.)
+ *   7. Guardrails (tab URL watcher + aggressive periodic scan)
+ *   8. Forum polling loop (findPoles, open tabs, blacklist filtering)
+ *   9. Badge management (per-tab, per-window, startup sync)
+ *  10. Thread watching system (parallel checks, immediate reactivity on tab/window switch)
+ *  11. HTML parsing helpers (countPostsInHtml, extractPoleAuthor)
+ */
+
 const FOROCOCHES_URL = 'https://www.forocoches.com/foro/forumdisplay.php?f=2';
 const ALARM_NAME = 'polileo-keepalive';
 const THREAD_WATCH_ALARM = 'polileo-thread-watch';
@@ -19,7 +48,10 @@ self.addEventListener('unhandledrejection', (event) => {
 });
 
 // ============================================
-// Offscreen Document for Audio Playback
+// OFFSCREEN DOCUMENT & SOUND PLAYBACK
+// Uses Manifest V3 offscreen document API for audio since service
+// workers can't play audio directly. Each sound function checks
+// per-window mute/active state before dispatching to offscreen.
 // ============================================
 
 let creatingOffscreen = null;
@@ -99,7 +131,7 @@ async function playSuccessSound(windowId) {
   }
 }
 
-// Tu post no fue pole (sad, you tried and failed)
+// Your post was not pole (sad, you tried and failed)
 async function playNotPoleSound(windowId) {
   try {
     const { globalMute, soundFail } = await chrome.storage.local.get(['globalMute', 'soundFail']);
@@ -117,7 +149,7 @@ async function playNotPoleSound(windowId) {
   }
 }
 
-// Alguien más hizo la pole (informational detection)
+// Someone else got the pole (informational detection)
 // Debounce specific to pole-detected to prevent multiple detectors from spamming
 let lastPoleDetectedTime = 0;
 
@@ -386,7 +418,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ success: true });
     return true;
   } else if (msg.action === 'requestSuccessSound') {
-    // Content script requesting success sound (pole conseguida)
+    // Content script requesting success sound (pole achieved)
     const windowId = sender.tab?.windowId;
     playSuccessSound(windowId)
       .then(() => sendResponse({ success: true }))
@@ -437,7 +469,11 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 // ============================================
-// GUARDRAILS - Ensure we don't miss any threads
+// GUARDRAILS — Redundant thread registration
+// Two layers to ensure no poleable thread is missed:
+//   1. Tab URL watcher: Detects navigation to thread pages
+//   2. Aggressive periodic scan (200ms): Scans all tabs for unregistered threads
+// Both are non-blocking and fire parallel checks.
 // ============================================
 
 // Extract thread ID from URL
@@ -863,7 +899,10 @@ async function updateAllBadges() {
 }
 
 // ============================================
-// Thread watching - SIMPLE SYSTEM: check ALL threads at interval
+// THREAD WATCHING — Parallel polling of all watched threads
+// Checks every thread at the configured interval (default 500ms).
+// Fires all requests in parallel via Promise.allSettled for speed.
+// On pole detection: notifies content script, plays sound, auto-cleans.
 // ============================================
 
 function startThreadWatching() {
@@ -945,7 +984,9 @@ async function checkThreadNow(threadId) {
 }
 
 // ============================================
-// Event listeners for IMMEDIATE reactivity
+// IMMEDIATE REACTIVITY — Tab/window switch triggers
+// When the user switches tabs or windows, immediately check
+// watched threads for that tab so detection feels instant.
 // ============================================
 
 // When user switches tabs - check immediately

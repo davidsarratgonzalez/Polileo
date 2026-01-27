@@ -1,3 +1,36 @@
+/**
+ * Polileo - Content Script
+ *
+ * Injected into forocoches.com pages. Handles all in-page functionality:
+ * - Pole detection: Monitors thread replies via DOM observation and background polling
+ * - UI overlay: Floating button, lock/mute controls, reply alerts, cooldown timer
+ * - Anti-fail: Checkbox to auto-delete failed pole attempts
+ * - Hotkeys: Keyboard shortcuts for toggle, lock, mute, focus, submit, delete
+ * - Auto-reconnection: Self-heals if the service worker restarts or crashes
+ * - Full editor module: Continues pole detection on newreply.php pages
+ *
+ * Communicates with background.js via chrome.runtime messaging.
+ *
+ * File structure (top-level sections):
+ *   1. Context validation & early exit
+ *   2. UI OVERLAY — Floating button, lock button, mute button, positioning
+ *   3. HOTKEY HANDLING — Configurable keyboard shortcuts
+ *   4. TOGGLE & STATE — Polileo active/inactive state per window
+ *   5. COOLDOWN SYSTEM — 30s post cooldown bar + post detection via DOM & URL
+ *   6. POST POSITION CHECK — Determine if your post is pole, offer delete if not
+ *   7. DELETE POST — Automated vBulletin delete with verification
+ *   8. ANTI-FAIL — Checkbox to block submit after pole is detected
+ *   9. THREAD MONITORING — Self-checking interval, health checks, reconnection
+ *  10. MESSAGE LISTENER — Receives poleDetected/windowStatusChanged from background
+ *  11. GUARDRAIL — checkAndRegister, visibility change re-checks
+ *  12. FULL EDITOR COOLDOWN MODULE (IIFE) — Handles cooldown on newreply.php/newthread.php
+ *  13. FULL EDITOR POLE DETECTION MODULE (IIFE) — Pole detection on newreply.php
+ */
+
+// ============================================
+// 1. CONTEXT VALIDATION & EARLY EXIT
+// ============================================
+
 // Check if extension context is still valid
 function isExtensionContextValid() {
   try {
@@ -12,6 +45,10 @@ if (!isExtensionContextValid()) {
   console.log('Polileo: Extension context invalid at load time, aborting');
   throw new Error('Extension context invalid');
 }
+
+// ============================================
+// 2. UI OVERLAY — Floating button, lock & mute
+// ============================================
 
 // Create floating button
 const btn = document.createElement('button');
@@ -174,9 +211,7 @@ function updateLockButton(isLocked) {
   lockBtn.className = isLocked ? 'locked' : 'unlocked';
 }
 
-// ============================================
-// Mute button (global mute)
-// ============================================
+// --- Mute button (global mute) ---
 
 // Initialize mute state
 function initMuteState() {
@@ -253,7 +288,7 @@ function updateMuteButton(isMuted) {
 }
 
 // ============================================
-// Hotkey handling
+// 3. HOTKEY HANDLING
 // ============================================
 
 const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -462,6 +497,10 @@ function matchesHotkey(event, hotkey) {
   return keyMatches && ctrlMatches && altMatches && metaMatches && shiftMatches;
 }
 
+// ============================================
+// 4. TOGGLE & STATE — Active/inactive per window
+// ============================================
+
 // Position button below subheader (if exists) or header, aligned with avatar
 function updateButtonPosition() {
   const subheader = document.getElementById('subheader');
@@ -553,7 +592,10 @@ try {
 }
 
 // ============================================
-// Cooldown system - track posts globally
+// 5. COOLDOWN SYSTEM — 30s post cooldown bar
+// Tracks post timestamps globally via storage.
+// Shows a fixed-position countdown bar after posting.
+// Detects posts via DOM observation, submit click, and URL params.
 // ============================================
 
 const COOLDOWN_DURATION = 30000; // 30 seconds
@@ -812,7 +854,13 @@ if (window.location.href.includes('posted=1')) {
   }
 }
 
-// Check post position and offer delete if not pole
+// ============================================
+// 6. POST POSITION CHECK
+// After posting, determines your post's position in the thread.
+// Position 2 = pole (success sound), position >2 = not pole (delete toast).
+// Uses 3 methods: postcount container, proximity match, and index counting.
+// ============================================
+
 function checkPostPositionAndOfferDelete(postId) {
   console.log('Polileo: === Checking position for post', postId, '===');
 
@@ -967,7 +1015,16 @@ function formatHotkeyDisplay(hotkey) {
   return parts.join('+');
 }
 
-// Show delete toast for failed pole attempts
+// ============================================
+// 7. DELETE POST
+// Shows a toast with a delete button when your post wasn't pole.
+// Automates vBulletin's multi-step delete flow:
+//   1. Fetch edit page to get security token
+//   2. POST delete request with token
+//   3. Verify deletion via 3 methods (direct URL, edit page, last page)
+// Also supports delete via configurable hotkey (works inside editor iframe).
+// ============================================
+
 function showDeleteToast(postId) {
   console.log('Polileo: showDeleteToast called for post', postId);
 
@@ -1413,11 +1470,27 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Anti-fail features on threads with no pole yet (always active)
+// ============================================
+// 8. ANTI-FAIL & THREAD INITIALIZATION
+// On thread pages with only 1 post (no pole yet):
+//   - Injects anti-fail checkbox next to submit button
+//   - Registers thread with background for watching
+//   - Starts self-checking interval (independent of background)
+//   - Starts health check (ensures self-check stays alive)
+// ============================================
+
 const threadId = getThreadId();
 console.log('Polileo: URL:', window.location.href, '-> threadId:', threadId);
 
-// Self-checking interval for this thread (content script doesn't sleep like service worker)
+// ============================================
+// 9. THREAD MONITORING — Self-check, health check, reconnection
+// Three-layer resilience system:
+//   - Self-check: Fetches thread HTML at interval to detect new posts
+//   - Health check: Backup timer that restarts self-check if it dies
+//   - Reconnection watcher: Re-registers thread after service worker crash
+// Self-check fires parallel requests (raceRequests) for speed.
+// ============================================
+
 let selfCheckInterval = null;
 let selfCheckRunning = false;
 
@@ -1804,9 +1877,7 @@ if (threadId) {
   }, 50);
 }
 
-// ============================================
-// Thread monitoring - detect new replies
-// ============================================
+// --- Helper functions: thread ID, post counting, username extraction ---
 
 let poleAlreadyDetected = false;
 
@@ -1950,7 +2021,13 @@ function getCurrentUsername() {
   return null;
 }
 
-// Show notification when pole detected
+// ============================================
+// 10. POLE NOTIFICATION & MESSAGE LISTENER
+// Shows an in-page alert when pole is detected (red for others, green for own).
+// Blocks submit button via anti-fail, auto-unlocks focus lock.
+// Listens for messages from background: poleDetected, windowStatusChanged, checkAndRegister.
+// ============================================
+
 function showPoleDetectedNotification(poleAuthor) {
   console.log('Polileo: showPoleDetectedNotification called with author:', poleAuthor);
 
@@ -2063,7 +2140,9 @@ try {
 }
 
 // ============================================
-// GUARDRAIL: Check and register thread if needed
+// 11. GUARDRAIL — Thread registration & visibility re-checks
+// Ensures every open thread with no pole is registered for watching,
+// even if the initial registration failed or context was lost.
 // ============================================
 
 function checkAndRegisterThread() {
@@ -2164,15 +2243,13 @@ function safeSendMessage(msg, callback) {
 }
 
 // ============================================
-// POST SUBMISSION COOLDOWN (Full Editor Pages)
-// ============================================
-// This is a completely isolated module (IIFE) that handles
-// cooldown detection when posting from FULL EDITOR pages:
-// - newthread.php (creating a new thread)
-// - newreply.php (replying via full editor)
-// Both redirect to showthread.php?p=XXX after success.
-// It does NOT modify any existing functions or variables.
-// It only uses countPostsInDOM() and showCooldownBar() which are safe.
+// 12. FULL EDITOR COOLDOWN MODULE (IIFE)
+// Isolated module for cooldown detection on full editor pages.
+// Part A: On newthread.php / newreply.php — marks form submission timestamp.
+// Part B: On showthread.php?p=XXX — checks if a recent submission occurred
+//         and triggers the cooldown bar if so.
+// Does NOT modify any outer-scope variables. Only calls countPostsInDOM()
+// and showCooldownBar() from the parent scope.
 // ============================================
 (function fullEditorCooldownModule() {
   'use strict';
@@ -2302,12 +2379,12 @@ function safeSendMessage(msg, callback) {
 })();
 
 // ============================================
-// POLE DETECTION ON FULL EDITOR (newreply.php)
-// ============================================
-// This module runs pole detection (self-checking) on newreply.php
-// ONLY when the thread was opened by Polileo (transitioned from ?polileo URL).
-// Use case: You're poling a thread, try to post during cooldown, get redirected
-// to full editor - you still want to know if someone stole the pole while writing.
+// 13. FULL EDITOR POLE DETECTION MODULE (IIFE)
+// Runs pole detection on newreply.php ONLY when the thread was opened by Polileo
+// (i.e., the thread ID matches activePolileoThread in storage).
+// Use case: You try to post during cooldown, get redirected to full editor —
+// you still want to know if someone stole the pole while you're writing.
+// Has its own reconnection loop independent of the main content script.
 // ============================================
 (function fullEditorPoleDetectionModule() {
   'use strict';

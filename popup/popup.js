@@ -1,3 +1,16 @@
+/**
+ * Polileo - Popup UI Script
+ *
+ * Controls the extension popup interface. Manages:
+ * - Toggle activation per window
+ * - Sound settings (master mute, per-sound toggles, focus-only mode)
+ * - Hotkey configuration with live recording
+ * - Advanced timing settings (poll interval, thread check interval)
+ * - Title blacklist management
+ *
+ * All settings are persisted via chrome.storage.local.
+ */
+
 document.addEventListener('DOMContentLoaded', () => {
   const toggleBtn = document.getElementById('toggleBtn');
   const statusEl = document.getElementById('status');
