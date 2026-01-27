@@ -137,11 +137,19 @@ self.addEventListener('unhandledrejection', (event) => {
 });
 
 // Auto-re-enable audio after 30s of stable uptime (crash-loop is over)
-setTimeout(() => {
+// Also proactively try to create the offscreen document so sound is ready
+setTimeout(async () => {
   if (audioDisabledByCrashLoop) {
     audioDisabledByCrashLoop = false;
     chrome.storage.local.set({ _crashLoopCount: 0 });
     console.log('Polileo BG: ✓ 30s stable — audio re-enabled, crash counter reset');
+  }
+  // Proactively warm up the offscreen document so first sound doesn't have creation delay
+  try {
+    const ok = await ensureOffscreenDocument();
+    console.log('Polileo BG: Offscreen document pre-warmed:', ok ? 'ready' : 'failed (non-fatal)');
+  } catch {
+    console.log('Polileo BG: Offscreen pre-warm failed (non-fatal)');
   }
 }, 30000);
 
@@ -492,8 +500,14 @@ chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const getWindowId = async () => {
     if (sender.tab?.windowId) return sender.tab.windowId;
-    const win = await chrome.windows.getCurrent();
-    return win.id;
+    try {
+      const win = await chrome.windows.getCurrent();
+      return win.id;
+    } catch {
+      // No current window (e.g., all minimized) — use last focused
+      const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+      return win.id;
+    }
   };
 
   if (msg.action === 'toggle') {
@@ -898,11 +912,20 @@ async function poll() {
             }
             // Play notification sound (fire-and-forget — never blocks core)
             playNotificationSound();
-            // Check if we should lock focus for this window
-            const shouldLock = await shouldLockFocusForWindow(windowId);
-            // Add polileo param so content script knows this was auto-opened
-            // If focus lock is ON, open in background (active: false)
-            chrome.tabs.create({ url: `${pole.url}&polileo`, active: !shouldLock, windowId });
+            // Open tab in the target window (with focus lock check)
+            try {
+              const shouldLock = await shouldLockFocusForWindow(windowId);
+              await chrome.tabs.create({ url: `${pole.url}&polileo`, active: !shouldLock, windowId });
+            } catch (tabErr) {
+              // Window might have closed or Chrome UI state prevents tab creation — retry without windowId
+              console.log('Polileo BG: tabs.create failed for window', windowId, ':', tabErr.message, '— retrying in last focused window');
+              try {
+                const fallbackWin = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+                await chrome.tabs.create({ url: `${pole.url}&polileo`, active: false, windowId: fallbackWin.id });
+              } catch (e2) {
+                console.log('Polileo BG: tabs.create fallback also failed:', e2.message);
+              }
+            }
           } else {
             console.log('Polileo BG: Pole already opened:', pole.id);
           }
@@ -1002,8 +1025,12 @@ async function shouldLockFocusForWindow(windowId) {
   }
 
   // Otherwise check manual preference (default: unlocked)
-  const { focusLockManual } = await chrome.storage.local.get(['focusLockManual']);
-  return focusLockManual || false;
+  try {
+    const { focusLockManual } = await chrome.storage.local.get(['focusLockManual']);
+    return focusLockManual || false;
+  } catch {
+    return false;
+  }
 }
 
 // Update badge for a single tab
@@ -1149,17 +1176,20 @@ async function checkThreadNow(threadId) {
 
 // When user switches tabs - check immediately
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  if (watchedThreads.size === 0) return;
+  try {
+    if (watchedThreads.size === 0) return;
 
-  const tabId = activeInfo.tabId;
+    const tabId = activeInfo.tabId;
 
-  // Find if this tab has a watched thread
-  for (const [threadId, info] of watchedThreads) {
-    if (info.tabId === tabId) {
-      console.log('Polileo BG: 🎯 Tab activated -> thread', threadId);
-      await checkThreadNow(threadId);
-      return;
+    for (const [threadId, info] of watchedThreads) {
+      if (info.tabId === tabId) {
+        console.log('Polileo BG: 🎯 Tab activated -> thread', threadId);
+        await checkThreadNow(threadId);
+        return;
+      }
     }
+  } catch (e) {
+    console.log('Polileo BG: Error in onActivated:', e.message);
   }
 });
 
