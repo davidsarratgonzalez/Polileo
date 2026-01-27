@@ -34,18 +34,143 @@ const MAX_OPENED_THREADS = 100;
 const OFFSCREEN_DOCUMENT_PATH = 'offscreen/offscreen.html';
 
 // ============================================
-// CRASH PREVENTION: Catch unhandled errors
+// CRASH PREVENTION & PERSISTENT LOGGING
+// Logs survive service worker restarts via chrome.storage.local.
+// On startup, prints the previous session's crash log (if any).
 // ============================================
-console.log('Polileo BG: ====== SERVICE WORKER STARTED ======', new Date().toISOString());
+const SW_START_TIME = Date.now();
+const SW_START_ISO = new Date().toISOString();
+console.log('Polileo BG: ====== SERVICE WORKER STARTED ======', SW_START_ISO);
+
+// --- Persistent crash log (survives SW restarts) ---
+const MAX_CRASH_LOG_ENTRIES = 30;
+
+function persistLog(type, message, stack) {
+  try {
+    chrome.storage.local.get(['_crashLog', '_swStartTime'], (result) => {
+      if (chrome.runtime.lastError) return;
+      const log = result._crashLog || [];
+      log.push({
+        ts: new Date().toISOString(),
+        uptime: ((Date.now() - SW_START_TIME) / 1000).toFixed(1) + 's',
+        type,
+        message: String(message).substring(0, 500),
+        stack: stack ? String(stack).substring(0, 500) : undefined
+      });
+      // Keep only the last N entries
+      while (log.length > MAX_CRASH_LOG_ENTRIES) log.shift();
+      chrome.storage.local.set({ _crashLog: log });
+    });
+  } catch {
+    // Storage itself failed — nothing we can do
+  }
+}
+
+// Save startup timestamp so we can detect crash restarts
+chrome.storage.local.get(['_swStartTime'], (result) => {
+  if (chrome.runtime.lastError) return;
+  const prevStart = result._swStartTime;
+  if (prevStart) {
+    const gap = SW_START_TIME - prevStart;
+    console.log('Polileo BG: Previous SW started at', new Date(prevStart).toISOString(),
+      '— gap:', (gap / 1000).toFixed(1) + 's');
+    // If the gap is very short (<5s), this is likely a crash restart
+    if (gap < 5000) {
+      console.warn('Polileo BG: ⚠️ SHORT GAP — likely crash restart!');
+      persistLog('CRASH_RESTART', `SW restarted after only ${(gap/1000).toFixed(1)}s gap`);
+    }
+  }
+  chrome.storage.local.set({ _swStartTime: SW_START_TIME });
+});
+
+// Print previous crash logs on startup (both background + content errors)
+chrome.storage.local.get(['_crashLog', '_contentErrorLog'], (result) => {
+  if (chrome.runtime.lastError) return;
+
+  const bgLog = result._crashLog;
+  if (bgLog && bgLog.length > 0) {
+    console.log('Polileo BG: === BACKGROUND CRASH LOG (' + bgLog.length + ' entries) ===');
+    bgLog.forEach(entry => {
+      console.log(`  [${entry.ts}] (uptime ${entry.uptime}) ${entry.type}: ${entry.message}`);
+      if (entry.stack) console.log(`    Stack: ${entry.stack}`);
+    });
+    console.log('Polileo BG: === END BACKGROUND LOG ===');
+  }
+
+  const contentLog = result._contentErrorLog;
+  if (contentLog && contentLog.length > 0) {
+    console.log('Polileo BG: === CONTENT SCRIPT ERROR LOG (' + contentLog.length + ' entries) ===');
+    contentLog.forEach(entry => {
+      console.log(`  [${entry.ts}] ${entry.type}: ${entry.message}`);
+      if (entry.url) console.log(`    URL: ${entry.url}`);
+      if (entry.stack) console.log(`    Stack: ${entry.stack}`);
+    });
+    console.log('Polileo BG: === END CONTENT LOG ===');
+  }
+});
 
 self.addEventListener('error', (event) => {
-  console.error('Polileo BG: UNHANDLED ERROR:', event.error?.message || event.message, event.error?.stack);
+  const msg = event.error?.message || event.message || 'Unknown error';
+  const stack = event.error?.stack;
+  console.error('Polileo BG: UNHANDLED ERROR:', msg, stack);
+  persistLog('ERROR', msg, stack);
 });
 
 self.addEventListener('unhandledrejection', (event) => {
-  console.error('Polileo BG: UNHANDLED REJECTION:', event.reason?.message || event.reason, event.reason?.stack);
+  const msg = event.reason?.message || String(event.reason) || 'Unknown rejection';
+  const stack = event.reason?.stack;
+  console.error('Polileo BG: UNHANDLED REJECTION:', msg, stack);
+  persistLog('REJECTION', msg, stack);
   event.preventDefault(); // Prevent crash
 });
+
+// ============================================
+// CONTENT SCRIPT RE-INJECTION ON STARTUP
+// When the service worker restarts after a crash, existing content scripts
+// are orphaned (chrome.runtime.id becomes undefined permanently).
+// The only way to recover is to re-inject the content script from here.
+// ============================================
+async function reinjectContentScripts() {
+  try {
+    const tabs = await chrome.tabs.query({ url: '*://*.forocoches.com/*' });
+    console.log('Polileo BG: [REINJECT] Found', tabs.length, 'forocoches tabs to re-inject');
+
+    for (const tab of tabs) {
+      if (!tab.id || tab.id === chrome.tabs.TAB_ID_NONE) continue;
+      // Skip non-http tabs (chrome://, about://, etc.)
+      if (!tab.url || !tab.url.startsWith('http')) continue;
+
+      try {
+        // Check if content script is alive by sending a ping
+        await chrome.tabs.sendMessage(tab.id, { action: 'ping' });
+        // If we get here, content script is alive — no need to re-inject
+        console.log('Polileo BG: [REINJECT] Tab', tab.id, 'content script alive, skipping');
+      } catch {
+        // Content script is dead/orphaned — re-inject
+        console.log('Polileo BG: [REINJECT] Tab', tab.id, 'content script dead, re-injecting...');
+        try {
+          // Inject CSS first, then JS
+          await chrome.scripting.insertCSS({
+            target: { tabId: tab.id },
+            files: ['content/content.css']
+          });
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['content/content.js']
+          });
+          console.log('Polileo BG: [REINJECT] ✓ Tab', tab.id, 're-injected successfully');
+        } catch (e) {
+          console.log('Polileo BG: [REINJECT] Failed to re-inject tab', tab.id, ':', e.message);
+        }
+      }
+    }
+  } catch (e) {
+    console.log('Polileo BG: [REINJECT] Error during re-injection sweep:', e.message);
+  }
+}
+
+// Run re-injection on startup (small delay to let service worker fully initialize)
+setTimeout(reinjectContentScripts, 1000);
 
 // ============================================
 // OFFSCREEN DOCUMENT & SOUND PLAYBACK

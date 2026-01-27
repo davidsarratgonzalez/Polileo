@@ -28,8 +28,53 @@
  */
 
 // ============================================
-// 1. CONTEXT VALIDATION & EARLY EXIT
+// 1. CONTEXT VALIDATION, CLEANUP & ERROR LOGGING
 // ============================================
+
+// Persistent error logging — saves to chrome.storage so errors survive page/SW restarts
+function persistContentError(type, message, stack) {
+  try {
+    if (!chrome.runtime?.id) return;
+    chrome.storage.local.get(['_contentErrorLog'], (result) => {
+      if (chrome.runtime.lastError) return;
+      const log = result._contentErrorLog || [];
+      log.push({
+        ts: new Date().toISOString(),
+        url: window.location.href.substring(0, 200),
+        type,
+        message: String(message).substring(0, 500),
+        stack: stack ? String(stack).substring(0, 500) : undefined
+      });
+      while (log.length > 20) log.shift();
+      chrome.storage.local.set({ _contentErrorLog: log });
+    });
+  } catch { /* storage failed */ }
+}
+
+window.addEventListener('error', (event) => {
+  persistContentError('ERROR', event.error?.message || event.message, event.error?.stack);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  persistContentError('REJECTION', event.reason?.message || String(event.reason), event.reason?.stack);
+});
+
+// If content script was already injected (re-injection after crash),
+// clean up old orphaned UI elements before re-initializing.
+(function cleanupOrphanedUI() {
+  const oldBtn = document.getElementById('polileo-btn');
+  const oldLock = document.getElementById('polileo-lock-btn');
+  const oldMute = document.getElementById('polileo-mute-btn');
+  const oldAlert = document.getElementById('polileo-reply-alert');
+  const oldCooldown = document.getElementById('polileo-cooldown');
+  const oldDeleteToast = document.getElementById('polileo-delete-toast');
+  const oldFullEditorAlert = document.getElementById('polileo-fulleditor-alert');
+  [oldBtn, oldLock, oldMute, oldAlert, oldCooldown, oldDeleteToast, oldFullEditorAlert]
+    .forEach(el => el && el.remove());
+  if (oldBtn) {
+    console.log('Polileo: Cleaned up orphaned UI from previous injection');
+  }
+})();
 
 // Check if extension context is still valid
 function isExtensionContextValid() {
@@ -1744,29 +1789,27 @@ async function selfCheckForPole() {
 }
 
 // Race multiple fetch requests - returns first successful response
+// Each request is a plain async function (no async Promise constructor anti-pattern).
 async function raceRequests(tid, count = 2) {
   const controllers = [];
-  const promises = [];
 
-  for (let i = 0; i < count; i++) {
+  // Build each request as an independent async function
+  function makeRequest(index) {
     const controller = new AbortController();
     controllers.push(controller);
 
-    // Add small stagger to avoid exact simultaneous requests
-    const delay = i * 50;
-
-    const promise = new Promise(async (resolve, reject) => {
-      await new Promise(r => setTimeout(r, delay));
+    return (async () => {
+      // Small stagger to avoid exact simultaneous requests
+      if (index > 0) {
+        await new Promise(r => setTimeout(r, index * 50));
+      }
 
       // Set timeout to abort slow requests
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-        reject(new Error('Timeout'));
-      }, POLE_CHECK_TIMEOUT);
+      const timeoutId = setTimeout(() => controller.abort(), POLE_CHECK_TIMEOUT);
 
       try {
         const resp = await fetch(
-          `${window.location.origin}/foro/showthread.php?t=${tid}&_=${Date.now()}&r=${i}`,
+          `${window.location.origin}/foro/showthread.php?t=${tid}&_=${Date.now()}&r=${index}`,
           {
             credentials: 'include',
             cache: 'no-store',
@@ -1777,20 +1820,19 @@ async function raceRequests(tid, count = 2) {
         clearTimeout(timeoutId);
 
         if (!resp.ok) {
-          reject(new Error(`HTTP ${resp.status}`));
-          return;
+          throw new Error(`HTTP ${resp.status}`);
         }
 
         const html = await resp.text();
-        resolve({ html, requestIndex: i });
+        return { html, requestIndex: index };
       } catch (e) {
         clearTimeout(timeoutId);
-        reject(e);
+        throw e;
       }
-    });
-
-    promises.push(promise);
+    })();
   }
+
+  const promises = Array.from({ length: count }, (_, i) => makeRequest(i));
 
   try {
     // Promise.any returns the first fulfilled promise
@@ -2124,6 +2166,11 @@ function showPoleDetectedNotification(poleAuthor) {
 // Listen for notifications from background
 try {
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // Ping from background to check if content script is alive
+    if (msg.action === 'ping') {
+      sendResponse({ alive: true });
+      return;
+    }
     if (msg.action === 'poleDetected' && !poleAlreadyDetected) {
       showPoleDetectedNotification(msg.poleAuthor);
     } else if (msg.action === 'windowStatusChanged') {
