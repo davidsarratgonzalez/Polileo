@@ -66,21 +66,33 @@ function persistLog(type, message, stack) {
   }
 }
 
-// Save startup timestamp so we can detect crash restarts
-chrome.storage.local.get(['_swStartTime'], (result) => {
+// Crash-loop detection: if we crash-loop too many times, disable audio to stabilize
+let audioDisabledByCrashLoop = false;
+
+chrome.storage.local.get(['_swStartTime', '_crashLoopCount'], (result) => {
   if (chrome.runtime.lastError) return;
   const prevStart = result._swStartTime;
+  let crashCount = result._crashLoopCount || 0;
+
   if (prevStart) {
     const gap = SW_START_TIME - prevStart;
     console.log('Polileo BG: Previous SW started at', new Date(prevStart).toISOString(),
       '— gap:', (gap / 1000).toFixed(1) + 's');
-    // If the gap is very short (<5s), this is likely a crash restart
     if (gap < 5000) {
-      console.warn('Polileo BG: ⚠️ SHORT GAP — likely crash restart!');
-      persistLog('CRASH_RESTART', `SW restarted after only ${(gap/1000).toFixed(1)}s gap`);
+      crashCount++;
+      console.warn('Polileo BG: ⚠️ CRASH RESTART #' + crashCount);
+      persistLog('CRASH_RESTART', `SW restarted after only ${(gap/1000).toFixed(1)}s gap (count: ${crashCount})`);
+      if (crashCount >= 3) {
+        audioDisabledByCrashLoop = true;
+        console.warn('Polileo BG: ⚠️ AUDIO DISABLED — too many crash restarts. Core will run without sound.');
+        persistLog('AUDIO_DISABLED', 'Disabled audio after ' + crashCount + ' crash loops');
+      }
+    } else {
+      // Normal restart (>5s gap) — reset crash counter
+      crashCount = 0;
     }
   }
-  chrome.storage.local.set({ _swStartTime: SW_START_TIME });
+  chrome.storage.local.set({ _swStartTime: SW_START_TIME, _crashLoopCount: crashCount });
 });
 
 // Print previous crash logs on startup (both background + content errors)
@@ -123,6 +135,15 @@ self.addEventListener('unhandledrejection', (event) => {
   persistLog('REJECTION', msg, stack);
   event.preventDefault(); // Prevent crash
 });
+
+// Auto-re-enable audio after 30s of stable uptime (crash-loop is over)
+setTimeout(() => {
+  if (audioDisabledByCrashLoop) {
+    audioDisabledByCrashLoop = false;
+    chrome.storage.local.set({ _crashLoopCount: 0 });
+    console.log('Polileo BG: ✓ 30s stable — audio re-enabled, crash counter reset');
+  }
+}, 30000);
 
 // ============================================
 // CONTENT SCRIPT RE-INJECTION ON STARTUP
@@ -204,6 +225,9 @@ setTimeout(reinjectWhenReady, 500);
 let offscreenReady = null;
 
 async function ensureOffscreenDocument() {
+  // Skip audio entirely if crash-loop detected — core survives without sound
+  if (audioDisabledByCrashLoop) return false;
+
   // If a creation attempt is already in flight, all callers share it
   if (offscreenReady) {
     return offscreenReady.catch(() => false);
@@ -268,7 +292,7 @@ async function playNotificationSound() {
     if (globalMute) return; // Master mute
     if (soundEnabled === false) return;
     if (!(await ensureOffscreenDocument())) return;
-    await chrome.runtime.sendMessage({ action: 'playNewThreadSound' }).catch(() => {});
+    chrome.runtime.sendMessage({ action: 'playNewThreadSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play sound:', e.message);
   }
@@ -277,61 +301,41 @@ async function playNotificationSound() {
 async function playSuccessSound(windowId) {
   try {
     const { globalMute, soundSuccess } = await chrome.storage.local.get(['globalMute', 'soundSuccess']);
-    console.log('Polileo BG: playSuccessSound - globalMute:', globalMute, 'soundSuccess:', soundSuccess, 'windowId:', windowId);
-    if (globalMute) return; // Master mute
-    if (soundSuccess === false) return;
+    if (globalMute || soundSuccess === false) return;
     if (windowId && !(await shouldPlaySound(windowId))) return;
     if (!(await ensureOffscreenDocument())) return;
-    await chrome.runtime.sendMessage({ action: 'playSuccessSound' }).catch(() => {});
+    chrome.runtime.sendMessage({ action: 'playSuccessSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play success sound:', e.message);
   }
 }
 
-// Your post was not pole (sad, you tried and failed)
 async function playNotPoleSound(windowId) {
   try {
     const { globalMute, soundFail } = await chrome.storage.local.get(['globalMute', 'soundFail']);
-    console.log('Polileo BG: playNotPoleSound - globalMute:', globalMute, 'soundFail:', soundFail, 'windowId:', windowId);
-    if (globalMute) return; // Master mute
-    if (soundFail !== true) {
-      console.log('Polileo BG: soundFail not enabled, skipping');
-      return; // Default: disabled
-    }
+    if (globalMute || soundFail !== true) return;
     if (windowId && !(await shouldPlaySound(windowId))) return;
     if (!(await ensureOffscreenDocument())) return;
-    await chrome.runtime.sendMessage({ action: 'playNotPoleSound' }).catch(() => {});
+    chrome.runtime.sendMessage({ action: 'playNotPoleSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play not-pole sound:', e.message);
   }
 }
 
-// Someone else got the pole (informational detection)
 // Debounce specific to pole-detected to prevent multiple detectors from spamming
 let lastPoleDetectedTime = 0;
 
 async function playPoleDetectedSound(windowId, hasFocus = false) {
   try {
-    // Only play if tab has focus (passed from content script)
-    if (!hasFocus) {
-      console.log('Polileo BG: playPoleDetectedSound skipped - tab not focused');
-      return;
-    }
-
-    // Debounce: 500ms between pole-detected sounds
+    if (!hasFocus) return;
     const now = Date.now();
-    if (now - lastPoleDetectedTime < 500) {
-      console.log('Polileo BG: playPoleDetectedSound debounced');
-      return;
-    }
+    if (now - lastPoleDetectedTime < 500) return;
     lastPoleDetectedTime = now;
 
     const { globalMute, soundDetected } = await chrome.storage.local.get(['globalMute', 'soundDetected']);
-    console.log('Polileo BG: playPoleDetectedSound - globalMute:', globalMute, 'soundDetected:', soundDetected);
-    if (globalMute) return; // Master mute
-    if (soundDetected === false) return;
+    if (globalMute || soundDetected === false) return;
     if (!(await ensureOffscreenDocument())) return;
-    await chrome.runtime.sendMessage({ action: 'playPoleDetectedSound' }).catch(() => {});
+    chrome.runtime.sendMessage({ action: 'playPoleDetectedSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play pole-detected sound:', e.message);
   }
@@ -517,10 +521,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const waitForStorage = () => new Promise((resolve) => {
       if (storageLoaded) return resolve();
       const check = setInterval(() => {
-        if (storageLoaded) { clearInterval(check); resolve(); }
+        if (storageLoaded) { clearInterval(check); clearTimeout(safety); resolve(); }
       }, 50);
-      // Safety timeout: don't wait forever
-      setTimeout(() => { clearInterval(check); resolve(); }, 3000);
+      const safety = setTimeout(() => { clearInterval(check); resolve(); }, 3000);
     });
     waitForStorage().then(() => getWindowId()).then(windowId => {
       const state = windowStates.get(windowId);
@@ -584,36 +587,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ success: true });
     return true;
   } else if (msg.action === 'requestSuccessSound') {
-    // Content script requesting success sound (pole achieved)
-    const windowId = sender.tab?.windowId;
-    playSuccessSound(windowId)
-      .then(() => sendResponse({ success: true }))
-      .catch((e) => {
-        console.log('Polileo BG: Error in requestSuccessSound:', e.message);
-        sendResponse({ success: false });
-      });
-    return true;
+    // Fire-and-forget — respond immediately, sound plays in background
+    playSuccessSound(sender.tab?.windowId);
+    sendResponse({ success: true });
+    return;
   } else if (msg.action === 'requestNotPoleSound') {
-    // Content script requesting not-pole sound (your post wasn't pole)
-    const windowId = sender.tab?.windowId;
-    playNotPoleSound(windowId)
-      .then(() => sendResponse({ success: true }))
-      .catch((e) => {
-        console.log('Polileo BG: Error in requestNotPoleSound:', e.message);
-        sendResponse({ success: false });
-      });
-    return true;
+    playNotPoleSound(sender.tab?.windowId);
+    sendResponse({ success: true });
+    return;
   } else if (msg.action === 'requestPoleDetectedSound') {
-    // Content script requesting pole-detected sound (someone else got pole)
-    // hasFocus is passed from content script to ensure sound only plays when tab is focused
-    const hasFocus = msg.hasFocus || false;
-    playPoleDetectedSound(null, hasFocus)
-      .then(() => sendResponse({ success: true }))
-      .catch((e) => {
-        console.log('Polileo BG: Error in requestPoleDetectedSound:', e.message);
-        sendResponse({ success: false });
-      });
-    return true;
+    playPoleDetectedSound(null, msg.hasFocus || false);
+    sendResponse({ success: true });
+    return;
   }
 });
 
@@ -748,14 +733,14 @@ async function checkThreadGuardrail(threadId, tabId) {
       }
     );
 
-    clearTimeout(timeoutId);
-
     if (!resp.ok) {
+      clearTimeout(timeoutId);
       threadsBeingChecked.delete(threadId);
       return;
     }
 
     const html = await resp.text();
+    clearTimeout(timeoutId);
     const postCount = countPostsInHtml(html);
 
     // Double-check it's not already watched (might have been registered while we fetched)
@@ -854,19 +839,20 @@ async function poll() {
     return;
   }
 
+  let pollTimeoutId;
   try {
     const pollController = new AbortController();
-    const pollTimeoutId = setTimeout(() => pollController.abort(), 10000); // 10s timeout
+    pollTimeoutId = setTimeout(() => pollController.abort(), 10000); // 10s timeout
 
     const resp = await fetch(`${FOROCOCHES_URL}&_=${Date.now()}`, {
       credentials: 'include',
       cache: 'no-store',
       signal: pollController.signal
     });
-    clearTimeout(pollTimeoutId);
 
     if (resp.ok) {
       const html = await resp.text();
+      clearTimeout(pollTimeoutId);
       const poles = findPoles(html);
       console.log('Polileo BG: Found', poles.length, 'potential poles');
 
@@ -910,8 +896,8 @@ async function poll() {
               const oldest = state.openedThreads.values().next().value;
               state.openedThreads.delete(oldest);
             }
-            // Play notification sound before opening the tab
-            await playNotificationSound();
+            // Play notification sound (fire-and-forget — never blocks core)
+            playNotificationSound();
             // Check if we should lock focus for this window
             const shouldLock = await shouldLockFocusForWindow(windowId);
             // Add polileo param so content script knows this was auto-opened
@@ -925,6 +911,7 @@ async function poll() {
       saveStates();
     }
   } catch (e) {
+    clearTimeout(pollTimeoutId);
     console.log('Polileo BG: Error during poll:', e.message);
   } finally {
     // ALWAYS schedule next poll if there are active windows (even after errors)
@@ -1216,14 +1203,14 @@ async function checkSingleThread(threadId, info) {
       }
     );
 
-    clearTimeout(timeoutId);
-
     if (!resp.ok) {
+      clearTimeout(timeoutId);
       console.log('Polileo: ✗ Fetch failed for thread', threadId, '- status:', resp.status);
       return;
     }
 
     const html = await resp.text();
+    clearTimeout(timeoutId);
     const currentCount = countPostsInHtml(html);
     const elapsed = Date.now() - checkStart;
 

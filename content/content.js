@@ -1817,13 +1817,13 @@ async function raceRequests(tid, count = 2) {
           }
         );
 
-        clearTimeout(timeoutId);
-
         if (!resp.ok) {
+          clearTimeout(timeoutId);
           throw new Error(`HTTP ${resp.status}`);
         }
 
         const html = await resp.text();
+        clearTimeout(timeoutId);
         return { html, requestIndex: index };
       } catch (e) {
         clearTimeout(timeoutId);
