@@ -66,33 +66,19 @@ function persistLog(type, message, stack) {
   }
 }
 
-// Crash-loop detection: if we crash-loop too many times, disable audio to stabilize
-let audioDisabledByCrashLoop = false;
-
-chrome.storage.local.get(['_swStartTime', '_crashLoopCount'], (result) => {
+// Crash restart detection for diagnostics
+chrome.storage.local.get(['_swStartTime'], (result) => {
   if (chrome.runtime.lastError) return;
   const prevStart = result._swStartTime;
-  let crashCount = result._crashLoopCount || 0;
-
   if (prevStart) {
     const gap = SW_START_TIME - prevStart;
     console.log('Polileo BG: Previous SW started at', new Date(prevStart).toISOString(),
       '— gap:', (gap / 1000).toFixed(1) + 's');
     if (gap < 5000) {
-      crashCount++;
-      console.warn('Polileo BG: ⚠️ CRASH RESTART #' + crashCount);
-      persistLog('CRASH_RESTART', `SW restarted after only ${(gap/1000).toFixed(1)}s gap (count: ${crashCount})`);
-      if (crashCount >= 3) {
-        audioDisabledByCrashLoop = true;
-        console.warn('Polileo BG: ⚠️ AUDIO DISABLED — too many crash restarts. Core will run without sound.');
-        persistLog('AUDIO_DISABLED', 'Disabled audio after ' + crashCount + ' crash loops');
-      }
-    } else {
-      // Normal restart (>5s gap) — reset crash counter
-      crashCount = 0;
+      persistLog('CRASH_RESTART', `SW restarted after only ${(gap/1000).toFixed(1)}s gap`);
     }
   }
-  chrome.storage.local.set({ _swStartTime: SW_START_TIME, _crashLoopCount: crashCount });
+  chrome.storage.local.set({ _swStartTime: SW_START_TIME });
 });
 
 // Print previous crash logs on startup (both background + content errors)
@@ -136,22 +122,7 @@ self.addEventListener('unhandledrejection', (event) => {
   event.preventDefault(); // Prevent crash
 });
 
-// Auto-re-enable audio after 30s of stable uptime (crash-loop is over)
-// Also proactively try to create the offscreen document so sound is ready
-setTimeout(async () => {
-  if (audioDisabledByCrashLoop) {
-    audioDisabledByCrashLoop = false;
-    chrome.storage.local.set({ _crashLoopCount: 0 });
-    console.log('Polileo BG: ✓ 30s stable — audio re-enabled, crash counter reset');
-  }
-  // Proactively warm up the offscreen document so first sound doesn't have creation delay
-  try {
-    const ok = await ensureOffscreenDocument();
-    console.log('Polileo BG: Offscreen document pre-warmed:', ok ? 'ready' : 'failed (non-fatal)');
-  } catch {
-    console.log('Polileo BG: Offscreen pre-warm failed (non-fatal)');
-  }
-}, 30000);
+// (Offscreen document is created eagerly on startup — see OFFSCREEN section below)
 
 // ============================================
 // CONTENT SCRIPT RE-INJECTION ON STARTUP
@@ -223,130 +194,140 @@ setTimeout(reinjectWhenReady, 500);
 
 // ============================================
 // OFFSCREEN DOCUMENT & SOUND PLAYBACK
-// Uses Manifest V3 offscreen document API for audio since service
-// workers can't play audio directly. Each sound function checks
-// per-window mute/active state before dispatching to offscreen.
+// Uses Manifest V3 offscreen document for audio (service workers can't play audio).
+//
+// Architecture: EAGER CREATE + HEALTH CHECK
+//   - Offscreen document is created once at startup (fire-and-forget)
+//   - A periodic health check (every 30s) recreates it if it died
+//   - Sound functions just sendMessage — no creation, no await, no blocking
+//   - If offscreen is dead, a sound is missed but nothing crashes
+//   - The health check recreates it so the next sound works
 // ============================================
 
-// Serialized singleton: all callers share a single promise so only one
-// creation attempt runs at a time and concurrent calls piggyback on it.
-let offscreenReady = null;
-
-async function ensureOffscreenDocument() {
-  // Skip audio entirely if crash-loop detected — core survives without sound
-  if (audioDisabledByCrashLoop) return false;
-
-  // If a creation attempt is already in flight, all callers share it
-  if (offscreenReady) {
-    return offscreenReady.catch(() => false);
-  }
-
-  offscreenReady = _createOffscreenOnce();
-  try {
-    return await offscreenReady;
-  } finally {
-    offscreenReady = null;
-  }
-}
-
-async function _createOffscreenOnce() {
-  try {
-    // Check if offscreen document already exists
-    try {
-      const contexts = await chrome.runtime.getContexts({
-        contextTypes: ['OFFSCREEN_DOCUMENT'],
-        documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
-      });
-      if (contexts.length > 0) return true;
-    } catch {
-      // getContexts unavailable — try creating, let Chrome reject if duplicate
+// Try to create the offscreen document. Fire-and-forget, never throws.
+function tryCreateOffscreen() {
+  // Use getContexts to check first (avoids noisy "already exists" errors)
+  chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
+  }).then(contexts => {
+    if (contexts.length > 0) {
+      console.log('Polileo BG: Offscreen document already alive');
+      return;
     }
-
-    await chrome.offscreen.createDocument({
+    return chrome.offscreen.createDocument({
       url: OFFSCREEN_DOCUMENT_PATH,
       reasons: ['AUDIO_PLAYBACK'],
-      justification: 'Play notification sound when new poleable thread is found'
+      justification: 'Play notification sounds for pole detection'
     });
-
-    // Give the document a moment to initialize its message listener
-    await new Promise(r => setTimeout(r, 50));
-    return true;
-  } catch (e) {
-    // "Only a single offscreen document" error means it already exists — that's fine
+  }).then(() => {
+    console.log('Polileo BG: ✓ Offscreen document ready');
+  }).catch(e => {
+    // "Only a single offscreen document" = already exists = fine
     if (e.message && e.message.includes('single offscreen')) {
-      return true;
+      console.log('Polileo BG: Offscreen document already exists (confirmed)');
+    } else {
+      console.log('Polileo BG: Offscreen creation failed (non-fatal):', e.message);
     }
-    console.log('Polileo BG: Error ensuring offscreen document:', e.message);
-    return false;
-  }
+  });
+}
+
+// Create offscreen eagerly on startup (small delay to let SW settle)
+setTimeout(tryCreateOffscreen, 1000);
+
+// Health check: recreate offscreen if it died (every 30s)
+setInterval(() => {
+  chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
+  }).then(contexts => {
+    if (contexts.length === 0) {
+      console.log('Polileo BG: [HEALTH] Offscreen document dead — recreating');
+      tryCreateOffscreen();
+    }
+  }).catch(() => {
+    // Can't check — try to create just in case
+    tryCreateOffscreen();
+  });
+}, 30000);
+
+// Fire-and-forget sound dispatch. Never awaits, never blocks, never throws.
+function fireSound(action) {
+  chrome.runtime.sendMessage({ action }).catch(() => {
+    // Offscreen is dead — recreate it so the next sound works
+    tryCreateOffscreen();
+  });
 }
 
 // Helper to check if sound should play based on window active state
-async function shouldPlaySound(windowId) {
-  const { soundOnlyWhenActive } = await chrome.storage.local.get(['soundOnlyWhenActive']);
-  // Default: enabled (only play when Polileo is active)
-  if (soundOnlyWhenActive === false) return true; // Explicitly disabled, play always
-
-  // Check if Polileo is active for this window
-  const state = windowStates.get(windowId);
-  const isActive = state?.isActive || false;
-  console.log('Polileo BG: shouldPlaySound - windowId:', windowId, 'isActive:', isActive, 'soundOnlyWhenActive:', soundOnlyWhenActive);
-  return isActive;
+function shouldPlaySound(windowId) {
+  return new Promise(resolve => {
+    try {
+      chrome.storage.local.get(['soundOnlyWhenActive'], (result) => {
+        if (chrome.runtime.lastError) return resolve(true);
+        if (result.soundOnlyWhenActive === false) return resolve(true);
+        const state = windowStates.get(windowId);
+        resolve(state?.isActive || false);
+      });
+    } catch { resolve(true); }
+  });
 }
 
-async function playNotificationSound() {
+// Sound functions — all fire-and-forget, never block core
+function playNotificationSound() {
   try {
-    const { globalMute, soundEnabled } = await chrome.storage.local.get(['globalMute', 'soundEnabled']);
-    if (globalMute) return; // Master mute
-    if (soundEnabled === false) return;
-    if (!(await ensureOffscreenDocument())) return;
-    chrome.runtime.sendMessage({ action: 'playNewThreadSound' }).catch(() => {});
-  } catch (e) {
-    console.log('Polileo BG: Could not play sound:', e.message);
-  }
+    chrome.storage.local.get(['globalMute', 'soundEnabled'], (result) => {
+      if (chrome.runtime.lastError) return;
+      if (result.globalMute || result.soundEnabled === false) return;
+      fireSound('playNewThreadSound');
+    });
+  } catch { /* non-fatal */ }
 }
 
-async function playSuccessSound(windowId) {
+function playSuccessSound(windowId) {
   try {
-    const { globalMute, soundSuccess } = await chrome.storage.local.get(['globalMute', 'soundSuccess']);
-    if (globalMute || soundSuccess === false) return;
-    if (windowId && !(await shouldPlaySound(windowId))) return;
-    if (!(await ensureOffscreenDocument())) return;
-    chrome.runtime.sendMessage({ action: 'playSuccessSound' }).catch(() => {});
-  } catch (e) {
-    console.log('Polileo BG: Could not play success sound:', e.message);
-  }
+    chrome.storage.local.get(['globalMute', 'soundSuccess', 'soundOnlyWhenActive'], (result) => {
+      if (chrome.runtime.lastError) return;
+      if (result.globalMute || result.soundSuccess === false) return;
+      if (result.soundOnlyWhenActive !== false && windowId) {
+        const state = windowStates.get(windowId);
+        if (!state?.isActive) return;
+      }
+      fireSound('playSuccessSound');
+    });
+  } catch { /* non-fatal */ }
 }
 
-async function playNotPoleSound(windowId) {
+function playNotPoleSound(windowId) {
   try {
-    const { globalMute, soundFail } = await chrome.storage.local.get(['globalMute', 'soundFail']);
-    if (globalMute || soundFail !== true) return;
-    if (windowId && !(await shouldPlaySound(windowId))) return;
-    if (!(await ensureOffscreenDocument())) return;
-    chrome.runtime.sendMessage({ action: 'playNotPoleSound' }).catch(() => {});
-  } catch (e) {
-    console.log('Polileo BG: Could not play not-pole sound:', e.message);
-  }
+    chrome.storage.local.get(['globalMute', 'soundFail', 'soundOnlyWhenActive'], (result) => {
+      if (chrome.runtime.lastError) return;
+      if (result.globalMute || result.soundFail !== true) return;
+      if (result.soundOnlyWhenActive !== false && windowId) {
+        const state = windowStates.get(windowId);
+        if (!state?.isActive) return;
+      }
+      fireSound('playNotPoleSound');
+    });
+  } catch { /* non-fatal */ }
 }
 
 // Debounce specific to pole-detected to prevent multiple detectors from spamming
 let lastPoleDetectedTime = 0;
 
-async function playPoleDetectedSound(windowId, hasFocus = false) {
+function playPoleDetectedSound(windowId, hasFocus = false) {
   try {
     if (!hasFocus) return;
     const now = Date.now();
     if (now - lastPoleDetectedTime < 500) return;
     lastPoleDetectedTime = now;
 
-    const { globalMute, soundDetected } = await chrome.storage.local.get(['globalMute', 'soundDetected']);
-    if (globalMute || soundDetected === false) return;
-    if (!(await ensureOffscreenDocument())) return;
-    chrome.runtime.sendMessage({ action: 'playPoleDetectedSound' }).catch(() => {});
-  } catch (e) {
-    console.log('Polileo BG: Could not play pole-detected sound:', e.message);
-  }
+    chrome.storage.local.get(['globalMute', 'soundDetected'], (result) => {
+      if (chrome.runtime.lastError) return;
+      if (result.globalMute || result.soundDetected === false) return;
+      fireSound('playPoleDetectedSound');
+    });
+  } catch { /* non-fatal */ }
 }
 
 // Timing defaults
