@@ -199,41 +199,53 @@ setTimeout(reinjectWhenReady, 500);
 // per-window mute/active state before dispatching to offscreen.
 // ============================================
 
-let creatingOffscreen = null;
+// Serialized singleton: all callers share a single promise so only one
+// creation attempt runs at a time and concurrent calls piggyback on it.
+let offscreenReady = null;
 
 async function ensureOffscreenDocument() {
+  // If a creation attempt is already in flight, all callers share it
+  if (offscreenReady) {
+    return offscreenReady.catch(() => false);
+  }
+
+  offscreenReady = _createOffscreenOnce();
+  try {
+    return await offscreenReady;
+  } finally {
+    offscreenReady = null;
+  }
+}
+
+async function _createOffscreenOnce() {
   try {
     // Check if offscreen document already exists
-    const existingContexts = await chrome.runtime.getContexts({
-      contextTypes: ['OFFSCREEN_DOCUMENT'],
-      documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
-    });
-
-    if (existingContexts.length > 0) {
-      return; // Already exists
+    try {
+      const contexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT'],
+        documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
+      });
+      if (contexts.length > 0) return true;
+    } catch {
+      // getContexts unavailable — try creating, let Chrome reject if duplicate
     }
 
-    // Avoid creating multiple offscreen documents simultaneously
-    if (creatingOffscreen) {
-      await creatingOffscreen;
-      return;
-    }
-
-    creatingOffscreen = chrome.offscreen.createDocument({
+    await chrome.offscreen.createDocument({
       url: OFFSCREEN_DOCUMENT_PATH,
       reasons: ['AUDIO_PLAYBACK'],
       justification: 'Play notification sound when new poleable thread is found'
     });
 
-    await creatingOffscreen;
-    creatingOffscreen = null;
-
-    // Give the document a moment to initialize
+    // Give the document a moment to initialize its message listener
     await new Promise(r => setTimeout(r, 50));
+    return true;
   } catch (e) {
+    // "Only a single offscreen document" error means it already exists — that's fine
+    if (e.message && e.message.includes('single offscreen')) {
+      return true;
+    }
     console.log('Polileo BG: Error ensuring offscreen document:', e.message);
-    creatingOffscreen = null;
-    throw e;
+    return false;
   }
 }
 
@@ -255,7 +267,7 @@ async function playNotificationSound() {
     const { globalMute, soundEnabled } = await chrome.storage.local.get(['globalMute', 'soundEnabled']);
     if (globalMute) return; // Master mute
     if (soundEnabled === false) return;
-    await ensureOffscreenDocument();
+    if (!(await ensureOffscreenDocument())) return;
     await chrome.runtime.sendMessage({ action: 'playNewThreadSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play sound:', e.message);
@@ -269,7 +281,7 @@ async function playSuccessSound(windowId) {
     if (globalMute) return; // Master mute
     if (soundSuccess === false) return;
     if (windowId && !(await shouldPlaySound(windowId))) return;
-    await ensureOffscreenDocument();
+    if (!(await ensureOffscreenDocument())) return;
     await chrome.runtime.sendMessage({ action: 'playSuccessSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play success sound:', e.message);
@@ -287,7 +299,7 @@ async function playNotPoleSound(windowId) {
       return; // Default: disabled
     }
     if (windowId && !(await shouldPlaySound(windowId))) return;
-    await ensureOffscreenDocument();
+    if (!(await ensureOffscreenDocument())) return;
     await chrome.runtime.sendMessage({ action: 'playNotPoleSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play not-pole sound:', e.message);
@@ -318,7 +330,7 @@ async function playPoleDetectedSound(windowId, hasFocus = false) {
     console.log('Polileo BG: playPoleDetectedSound - globalMute:', globalMute, 'soundDetected:', soundDetected);
     if (globalMute) return; // Master mute
     if (soundDetected === false) return;
-    await ensureOffscreenDocument();
+    if (!(await ensureOffscreenDocument())) return;
     await chrome.runtime.sendMessage({ action: 'playPoleDetectedSound' }).catch(() => {});
   } catch (e) {
     console.log('Polileo BG: Could not play pole-detected sound:', e.message);

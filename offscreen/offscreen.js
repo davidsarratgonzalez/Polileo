@@ -146,22 +146,39 @@ function playPoleDetectedSound() {
   });
 }
 
+// Safe wrapper — sound errors must never crash the offscreen document
+function safePlay(fn) {
+  try { fn(); } catch (e) {
+    console.log('Polileo Offscreen: Sound error:', e.message);
+  }
+}
+
 // Listen for messages from the background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'playSound' || message.action === 'playNewThreadSound') {
-    playNewThreadSound();
+    safePlay(playNewThreadSound);
     sendResponse({ success: true });
   } else if (message.action === 'playSuccessSound') {
-    playSuccessSound();
+    safePlay(playSuccessSound);
     sendResponse({ success: true });
   } else if (message.action === 'playNotPoleSound') {
-    playNotPoleSound();
+    safePlay(playNotPoleSound);
     sendResponse({ success: true });
   } else if (message.action === 'playPoleDetectedSound') {
-    playPoleDetectedSound();
+    safePlay(playPoleDetectedSound);
     sendResponse({ success: true });
   }
   return true;
+});
+
+// Prevent unhandled errors from crashing the offscreen document
+window.addEventListener('error', (e) => {
+  console.log('Polileo Offscreen: Uncaught error:', e.message);
+  e.preventDefault();
+});
+window.addEventListener('unhandledrejection', (e) => {
+  console.log('Polileo Offscreen: Unhandled rejection:', e.reason);
+  e.preventDefault();
 });
 
 console.log('Polileo: Offscreen document ready for audio playback');
